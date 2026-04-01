@@ -9,9 +9,7 @@ pytestmark = pytest.mark.usefixtures("mock_qdrant_client")
 
 
 @pytest.mark.asyncio
-async def test_upload_pdf_success(
-    client: AsyncClient, sample_pdf_bytes, mock_qdrant_client
-):
+async def test_upload_pdf_success(client: AsyncClient, sample_pdf_bytes, mock_qdrant_client):
     from app.core.storages import StorageBackend
 
     mock_storage = MagicMock(spec=StorageBackend)
@@ -34,9 +32,7 @@ async def test_upload_pdf_success(
     ):
         response = await client.post(
             "/api/v1/documents/upload",
-            files={
-                "file": ("test.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")
-            },
+            files={"file": ("test.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")},
         )
 
     assert response.status_code == 201

@@ -1,4 +1,5 @@
 """Tests cho chat endpoints."""
+
 import base64
 import pytest
 from httpx import AsyncClient

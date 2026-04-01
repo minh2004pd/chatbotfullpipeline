@@ -42,9 +42,7 @@ def mock_storage() -> MagicMock:
 
 @pytest.fixture
 def rag_service(mock_qdrant_repo, mock_storage):
-    return RAGService(
-        qdrant_repo=mock_qdrant_repo, settings=get_settings(), storage=mock_storage
-    )
+    return RAGService(qdrant_repo=mock_qdrant_repo, settings=get_settings(), storage=mock_storage)
 
 
 @pytest.fixture
@@ -55,17 +53,13 @@ def memory_service(mock_mem0_repo):
 # --- RAGService tests ---
 
 
-def test_ingest_pdf_success(
-    rag_service, mock_qdrant_repo, mock_storage, sample_pdf_bytes
-):
+def test_ingest_pdf_success(rag_service, mock_qdrant_repo, mock_storage, sample_pdf_bytes):
     with (
         patch(
             "app.services.rag_service.extract_pdf_text",
             return_value="Nội dung PDF test",
         ),
-        patch(
-            "app.services.rag_service.chunk_text", return_value=["chunk 1", "chunk 2"]
-        ),
+        patch("app.services.rag_service.chunk_text", return_value=["chunk 1", "chunk 2"]),
         patch(
             "app.services.rag_service.get_embeddings_batch",
             return_value=[[0.1] * 768] * 2,
@@ -86,23 +80,17 @@ def test_ingest_pdf_success(
 
 def test_ingest_invalid_pdf_raises(rag_service):
     with pytest.raises(ValueError, match="PDF"):
-        rag_service.ingest_pdf(
-            file_bytes=b"Not a PDF", filename="fake.pdf", user_id="user1"
-        )
+        rag_service.ingest_pdf(file_bytes=b"Not a PDF", filename="fake.pdf", user_id="user1")
 
 
 def test_ingest_pdf_too_large_raises(mock_qdrant_repo, mock_storage, sample_pdf_bytes):
     settings = MagicMock()
     settings.max_upload_size_bytes = 5
     settings.max_upload_size_mb = 0
-    service = RAGService(
-        qdrant_repo=mock_qdrant_repo, settings=settings, storage=mock_storage
-    )
+    service = RAGService(qdrant_repo=mock_qdrant_repo, settings=settings, storage=mock_storage)
 
     with pytest.raises(ValueError, match="quá lớn"):
-        service.ingest_pdf(
-            file_bytes=sample_pdf_bytes, filename="test.pdf", user_id="user1"
-        )
+        service.ingest_pdf(file_bytes=sample_pdf_bytes, filename="test.pdf", user_id="user1")
 
 
 def test_search_returns_results(rag_service, mock_qdrant_repo):
@@ -114,9 +102,7 @@ def test_search_returns_results(rag_service, mock_qdrant_repo):
             "score": 0.92,
         }
     ]
-    with patch(
-        "app.services.rag_service.get_query_embedding", return_value=[0.1] * 768
-    ):
+    with patch("app.services.rag_service.get_query_embedding", return_value=[0.1] * 768):
         results = rag_service.search(query="câu hỏi test", user_id="user1")
 
     assert len(results) == 1

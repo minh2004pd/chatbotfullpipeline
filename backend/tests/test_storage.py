@@ -16,20 +16,26 @@ def local_storage(tmp_path: Path) -> LocalStorage:
 
 
 def test_local_storage_save(local_storage: LocalStorage, tmp_path: Path):
-    key = local_storage.save(b"%PDF-test", user_id="user1", document_id="doc-1", filename="test.pdf")
+    key = local_storage.save(
+        b"%PDF-test", user_id="user1", document_id="doc-1", filename="test.pdf"
+    )
     assert key == "user1/doc-1/test.pdf"
     assert (tmp_path / key).read_bytes() == b"%PDF-test"
 
 
 def test_local_storage_get_url(local_storage: LocalStorage, tmp_path: Path):
-    key = local_storage.save(b"%PDF-test", user_id="user1", document_id="doc-1", filename="test.pdf")
+    key = local_storage.save(
+        b"%PDF-test", user_id="user1", document_id="doc-1", filename="test.pdf"
+    )
     url = local_storage.get_url(key)
     assert str(tmp_path) in url
     assert "user1/doc-1/test.pdf" in url
 
 
 def test_local_storage_delete(local_storage: LocalStorage, tmp_path: Path):
-    key = local_storage.save(b"%PDF-test", user_id="user1", document_id="doc-1", filename="test.pdf")
+    key = local_storage.save(
+        b"%PDF-test", user_id="user1", document_id="doc-1", filename="test.pdf"
+    )
     local_storage.delete(key)
     assert not (tmp_path / key).exists()
     # Thư mục doc-1/ và user1/ phải được dọn sạch
@@ -42,11 +48,11 @@ def test_local_storage_delete_nonexistent(local_storage: LocalStorage):
     local_storage.delete("user1/doc-99/ghost.pdf")
 
 
-def test_local_storage_prevents_path_traversal(
-    local_storage: LocalStorage, tmp_path: Path
-):
+def test_local_storage_prevents_path_traversal(local_storage: LocalStorage, tmp_path: Path):
     """Path traversal trong filename phải bị chặn."""
-    key = local_storage.save(b"%PDF", user_id="user1", document_id="doc-1", filename="../../etc/passwd")
+    key = local_storage.save(
+        b"%PDF", user_id="user1", document_id="doc-1", filename="../../etc/passwd"
+    )
     assert key == "user1/doc-1/passwd"
     assert (tmp_path / key).exists()
 
@@ -60,9 +66,7 @@ def mock_boto3_client():
     with patch("boto3.client") as mock_client_factory:
         mock_client = MagicMock()
         mock_client_factory.return_value = mock_client
-        mock_client.generate_presigned_url.return_value = (
-            "https://s3.example.com/presigned"
-        )
+        mock_client.generate_presigned_url.return_value = "https://s3.example.com/presigned"
         yield mock_client
 
 

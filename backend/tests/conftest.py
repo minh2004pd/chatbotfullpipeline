@@ -4,6 +4,7 @@ Pytest fixtures dùng chung.
 Dùng app.dependency_overrides thay vì unittest.mock.patch —
 sạch hơn, không cần biết module path của import.
 """
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from httpx import AsyncClient, ASGITransport
@@ -11,7 +12,6 @@ from httpx import AsyncClient, ASGITransport
 from app.main import create_app
 from app.core.database import get_qdrant_client, get_mem0_client
 from app.agents.root_agent import get_runner, get_session_service
-
 
 
 @pytest.fixture
@@ -34,6 +34,7 @@ async def client(app):
 
 # --- Mock Qdrant ---
 
+
 @pytest.fixture
 def mock_qdrant_client(app):
     client = MagicMock()
@@ -51,6 +52,7 @@ def mock_qdrant_client(app):
 
 # --- Mock mem0 ---
 
+
 @pytest.fixture
 def mock_mem0_client(app):
     client = MagicMock()
@@ -65,6 +67,7 @@ def mock_mem0_client(app):
 
 
 # --- Mock ADK Runner ---
+
 
 @pytest.fixture
 def mock_runner(app):
@@ -91,6 +94,7 @@ def mock_runner(app):
 
 
 # --- Sample PDF bytes ---
+
 
 @pytest.fixture
 def sample_pdf_bytes() -> bytes:
