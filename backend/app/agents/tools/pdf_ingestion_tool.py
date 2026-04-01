@@ -1,4 +1,5 @@
 """Tool để ingest PDF files vào Qdrant."""
+
 import structlog
 from google.adk.tools import ToolContext
 
@@ -14,7 +15,7 @@ logger = structlog.get_logger(__name__)
 def ingest_pdf_artifact(artifact_name: str, tool_context: ToolContext) -> dict:
     """
     Thực hiện quy trình xử lý nội dung (Ingestion): Trích xuất văn bản, chia nhỏ (chunking) và vector hóa file PDF để đưa vào cơ sở dữ liệu RAG.
-    
+
     HƯỚNG DẪN SỬ DỤNG CHO AI (QUAN TRỌNG):
     - BẮT BUỘC gọi công cụ này ngay lập tức khi người dùng vừa tải lên một file PDF mới (artifact).
     - Bạn KHÔNG THỂ sử dụng 'search_documents' để tìm nội dung trong file đó nếu chưa chạy 'ingest_pdf_artifact' thành công.

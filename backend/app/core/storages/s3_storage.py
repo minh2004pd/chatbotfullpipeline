@@ -54,9 +54,7 @@ class S3Storage:
             Body=file_bytes,
             ContentType="application/pdf",
         )
-        logger.info(
-            "storage_s3_saved", bucket=self._bucket, key=key, bytes=len(file_bytes)
-        )
+        logger.info("storage_s3_saved", bucket=self._bucket, key=key, bytes=len(file_bytes))
         return key
 
     def delete(self, key: str) -> None:

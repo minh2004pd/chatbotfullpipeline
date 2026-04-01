@@ -41,13 +41,9 @@ def get_storage() -> StorageBackend:
             endpoint_url=settings.s3_endpoint_url,
             presigned_url_expiry=settings.s3_presigned_url_expiry,
         )
-        logger.info(
-            "storage_backend_initialized", backend="s3", bucket=settings.s3_bucket
-        )
+        logger.info("storage_backend_initialized", backend="s3", bucket=settings.s3_bucket)
     else:
         storage = LocalStorage(upload_dir=settings.upload_dir)
-        logger.info(
-            "storage_backend_initialized", backend="local", dir=settings.upload_dir
-        )
+        logger.info("storage_backend_initialized", backend="local", dir=settings.upload_dir)
 
     return storage

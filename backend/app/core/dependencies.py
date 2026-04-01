@@ -125,9 +125,7 @@ def get_chat_service(
     session_service: InMemorySessionService = Depends(get_session_service),
     settings: Settings = Depends(get_settings),
 ) -> ChatService:
-    return ChatService(
-        runner=runner, session_service=session_service, settings=settings
-    )
+    return ChatService(runner=runner, session_service=session_service, settings=settings)
 
 
 # --- Annotated shorthands (dùng trong endpoint signatures) ---

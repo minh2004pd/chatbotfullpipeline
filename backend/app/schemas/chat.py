@@ -16,7 +16,7 @@ class ChatMessage(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(default="", max_length=10000)
+    message: str = Field(default="", min_length=1, max_length=10000)
     user_id: str = Field(default="default_user", min_length=1, max_length=100)
     session_id: str | None = None
     image_base64: str | None = None  # base64 encoded image

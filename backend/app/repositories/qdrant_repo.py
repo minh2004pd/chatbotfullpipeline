@@ -105,11 +105,7 @@ class QdrantRepository:
             collection_name=self.collection,
             points_selector=FilterSelector(
                 filter=Filter(
-                    must=[
-                        FieldCondition(
-                            key="document_id", match=MatchValue(value=document_id)
-                        )
-                    ]
+                    must=[FieldCondition(key="document_id", match=MatchValue(value=document_id))]
                 )
             ),
         )
@@ -119,11 +115,7 @@ class QdrantRepository:
         result = self.client.count(
             collection_name=self.collection,
             count_filter=Filter(
-                must=[
-                    FieldCondition(
-                        key="document_id", match=MatchValue(value=document_id)
-                    )
-                ]
+                must=[FieldCondition(key="document_id", match=MatchValue(value=document_id))]
             ),
             exact=True,
         )

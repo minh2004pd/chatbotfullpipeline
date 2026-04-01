@@ -22,9 +22,7 @@ class RAGService:
         self.settings = settings
         self.storage = storage
 
-    def ingest_pdf(
-        self, file_bytes: bytes, filename: str, user_id: str
-    ) -> tuple[str, int]:
+    def ingest_pdf(self, file_bytes: bytes, filename: str, user_id: str) -> tuple[str, int]:
         """
         Ingest PDF vào Qdrant.
 
@@ -35,9 +33,7 @@ class RAGService:
             raise ValueError("File không phải định dạng PDF hợp lệ.")
 
         if len(file_bytes) > self.settings.max_upload_size_bytes:
-            raise ValueError(
-                f"File quá lớn. Tối đa {self.settings.max_upload_size_mb}MB."
-            )
+            raise ValueError(f"File quá lớn. Tối đa {self.settings.max_upload_size_mb}MB.")
 
         document_id = _new_id()
         self.storage.save(file_bytes, user_id=user_id, document_id=document_id, filename=filename)

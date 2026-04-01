@@ -1,4 +1,5 @@
 """Document Service: orchestrate PDF upload flow."""
+
 from datetime import datetime
 
 import structlog

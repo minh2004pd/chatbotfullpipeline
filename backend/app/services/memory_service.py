@@ -1,4 +1,5 @@
 """Memory Service: quản lý long-term memory với mem0."""
+
 import structlog
 
 from app.repositories.mem0_repo import Mem0Repository

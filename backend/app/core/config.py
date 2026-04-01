@@ -42,9 +42,7 @@ class Settings(BaseSettings):
     s3_region: str = "ap-southeast-1"
     s3_access_key_id: str = ""
     s3_secret_access_key: str = ""
-    s3_session_token: str = (
-        ""  # bắt buộc với temporary credentials (ASIA... keys từ STS/SSO)
-    )
+    s3_session_token: str = ""  # bắt buộc với temporary credentials (ASIA... keys từ STS/SSO)
     s3_endpoint_url: str = ""  # optional: MinIO / custom S3
     s3_prefix: str = "uploads"
     s3_presigned_url_expiry: int = 3600  # seconds

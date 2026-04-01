@@ -50,9 +50,7 @@ def get_query_embedding(text: str) -> list[float]:
     return result.embeddings[0].values
 
 
-def get_embeddings_batch(
-    texts: list[str], batch_size: int | None = None
-) -> list[list[float]]:
+def get_embeddings_batch(texts: list[str], batch_size: int | None = None) -> list[list[float]]:
     """Embed nhiều đoạn text theo batch."""
     config = get_llm_config()
     client = get_genai_client()
@@ -61,9 +59,7 @@ def get_embeddings_batch(
     effective_batch_size = batch_size or config.embedding.batch_size
 
     for i in range(0, len(texts), effective_batch_size):
-        batch = [
-            t[: config.rag.max_doc_length] for t in texts[i : i + effective_batch_size]
-        ]
+        batch = [t[: config.rag.max_doc_length] for t in texts[i : i + effective_batch_size]]
         result = client.models.embed_content(
             model=config.embedding.model,
             contents=batch,

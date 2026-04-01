@@ -37,9 +37,7 @@ async def upload_document(
             detail=f"File quá lớn. Tối đa {settings.max_upload_size_mb}MB.",
         )
 
-    return service.upload_pdf(
-        file_bytes=file_bytes, filename=file.filename, user_id=user_id
-    )
+    return service.upload_pdf(file_bytes=file_bytes, filename=file.filename, user_id=user_id)
 
 
 @router.get("", response_model=DocumentListResponse)

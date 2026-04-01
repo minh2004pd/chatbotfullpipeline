@@ -1,4 +1,5 @@
 """Tool để tìm kiếm tài liệu trong Qdrant (RAG retrieval)."""
+
 import structlog
 from google.adk.tools import ToolContext
 

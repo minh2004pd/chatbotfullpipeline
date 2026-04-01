@@ -2,6 +2,7 @@
 ContextFilterPlugin: Giới hạn số lượng messages được gửi lên LLM
 để tránh token explosion trong long conversations.
 """
+
 import structlog
 from google.adk.agents.callback_context import CallbackContext
 from google.adk.models.llm_request import LlmRequest

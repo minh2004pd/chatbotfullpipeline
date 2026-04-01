@@ -1,4 +1,5 @@
 """Tool để list các tài liệu đã upload của người dùng."""
+
 import structlog
 from google.adk.tools import ToolContext
 
@@ -11,9 +12,9 @@ logger = structlog.get_logger(__name__)
 def list_user_documents(tool_context: ToolContext) -> dict:
     """
     Truy xuất danh sách tất cả các tài liệu (PDF) mà người dùng hiện tại đã tải lên và lưu trữ trong hệ thống.
-    
+
     HƯỚNG DẪN SỬ DỤNG CHO AI:
-    - Đây là công cụ ưu tiên để xác định phạm vi kiến thức. 
+    - Đây là công cụ ưu tiên để xác định phạm vi kiến thức.
     - Hãy gọi công cụ này khi người dùng hỏi về danh sách file, hoặc khi bạn cần 'document_id' chính xác để phục vụ việc tìm kiếm chuyên sâu trong một file cụ thể.
     - Nếu người dùng hỏi về một chủ đề mà bạn không chắc nằm ở file nào, hãy chạy lệnh này để xem danh sách tên file gợi ý.
 
@@ -44,8 +45,7 @@ def list_user_documents(tool_context: ToolContext) -> dict:
         return {
             "found": True,
             "documents": [
-                {"document_id": d["document_id"], "filename": d["filename"]}
-                for d in documents
+                {"document_id": d["document_id"], "filename": d["filename"]} for d in documents
             ],
             "count": len(documents),
         }
