@@ -120,6 +120,25 @@ resource "aws_iam_user_policy" "github_actions" {
         Action   = ["iam:PassRole"]
         Resource = [aws_iam_role.ecs_task_execution_role.arn]
       },
+      {
+        Sid    = "FrontendS3Deploy"
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:ListBucket",
+        ]
+        Resource = [
+          aws_s3_bucket.frontend.arn,
+          "${aws_s3_bucket.frontend.arn}/*",
+        ]
+      },
+      {
+        Sid      = "CloudFrontInvalidate"
+        Effect   = "Allow"
+        Action   = ["cloudfront:CreateInvalidation"]
+        Resource = [aws_cloudfront_distribution.frontend.arn]
+      },
     ]
   })
 }
