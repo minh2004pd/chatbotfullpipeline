@@ -1,0 +1,76 @@
+"""FastAPI application entry point."""
+
+import structlog
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.core.config import get_settings
+from app.core.database import ensure_collections
+from app.core.logger import setup_logging
+from app.api.v1 import chat, documents, memory
+from app.exceptions.handlers import register_exception_handlers
+
+# Khởi tạo logging
+setup_logging()
+
+logger = structlog.get_logger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup / shutdown lifecycle."""
+    settings = get_settings()
+    logger.info("app_starting", name=settings.app_name, version=settings.app_version)
+
+    try:
+        await ensure_collections()
+        logger.info("qdrant_collections_ready")
+    except Exception as e:
+        logger.warning("qdrant_init_failed", error=str(e))
+
+    yield
+
+    logger.info("app_shutdown")
+
+
+def create_app() -> FastAPI:
+    settings = get_settings()
+
+    app = FastAPI(
+        title=settings.app_name,
+        version=settings.app_version,
+        description="Multimodal chatbot with RAG and long-term memory",
+        lifespan=lifespan,
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.allowed_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # Routers
+    app.include_router(chat.router, prefix="/api/v1")
+    app.include_router(documents.router, prefix="/api/v1")
+    app.include_router(memory.router, prefix="/api/v1")
+
+    # Exception handlers
+    register_exception_handlers(app)
+
+    @app.get("/health")
+    async def health_check():
+        return {"status": "ok", "version": settings.app_version}
+
+    return app
+
+
+app = create_app()
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

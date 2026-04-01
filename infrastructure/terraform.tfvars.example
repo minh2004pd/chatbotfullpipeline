@@ -1,0 +1,15 @@
+# Copy file này thành terraform.tfvars và điền giá trị thật
+# terraform.tfvars được gitignore — không commit lên GitHub
+
+aws_region   = "ap-southeast-2"
+project_name = "memrag"
+
+# EC2
+instance_type    = "t3.small"
+key_pair_name    = "your-key-pair-name"  # Tên key pair trên AWS Console
+allowed_ssh_cidr = "YOUR_IP/32"          # Thay bằng IP của bạn
+
+# App
+gemini_api_key  = "AIzaSy..."
+qdrant_url      = "http://localhost:6333"
+allowed_origins = "[\"http://localhost:5173\"]"
