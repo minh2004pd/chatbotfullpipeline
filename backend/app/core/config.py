@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # Google Gemini
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
-    gemini_embedding_model: str = "models/embedding-001"
+    gemini_embedding_model: str = "gemini-embedding-001"
 
     # Qdrant
     qdrant_url: str = "http://localhost:6333"

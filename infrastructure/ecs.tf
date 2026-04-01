@@ -12,7 +12,7 @@ resource "aws_ecs_cluster" "main" {
 # ── Task Definition ──────────────────────────────────────────────────────────
 resource "aws_ecs_task_definition" "backend" {
   family             = var.ecs_task_family
-  network_mode       = "bridge" # EC2 launch type dùng bridge (không phải awsvpc)
+  network_mode       = "host" # dùng host network để container reach localhost:6333 (Qdrant)
   execution_role_arn = aws_iam_role.ecs_task_execution_role.arn
 
   # CPU/memory ở level task (soft limit, EC2 launch type không enforce cứng như Fargate)
@@ -31,12 +31,12 @@ resource "aws_ecs_task_definition" "backend" {
 
       portMappings = [{
         containerPort = var.container_port
-        hostPort      = var.container_port
         protocol      = "tcp"
       }]
 
       environment = [
         { name = "GEMINI_MODEL", value = var.gemini_model },
+        { name = "GEMINI_EMBEDDING_MODEL", value = "gemini-embedding-001" },
         { name = "QDRANT_URL", value = var.qdrant_url },
         { name = "ALLOWED_ORIGINS", value = var.allowed_origins },
         { name = "STORAGE_BACKEND", value = var.storage_backend },
@@ -66,11 +66,11 @@ resource "aws_ecs_task_definition" "backend" {
       }
 
       healthCheck = {
-        command     = ["CMD-SHELL", "curl -f http://localhost:${var.container_port}/health || exit 1"]
+        command     = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:${var.container_port}/health')\" || exit 1"]
         interval    = 30
-        timeout     = 5
+        timeout     = 10
         retries     = 3
-        startPeriod = 30
+        startPeriod = 60
       }
     }
   ])
