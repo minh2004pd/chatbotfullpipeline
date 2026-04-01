@@ -12,22 +12,64 @@ resource "aws_ecs_cluster" "main" {
 # ── Task Definition ──────────────────────────────────────────────────────────
 resource "aws_ecs_task_definition" "backend" {
   family             = var.ecs_task_family
-  network_mode       = "host" # dùng host network để container reach localhost:6333 (Qdrant)
+  network_mode       = "host" # cả 2 container dùng chung network EC2 host
   execution_role_arn = aws_iam_role.ecs_task_execution_role.arn
 
-  # CPU/memory ở level task (soft limit, EC2 launch type không enforce cứng như Fargate)
   cpu    = var.task_cpu
   memory = var.task_memory
 
+  # Bind mount /qdrant/storage trên EBS gp3 vào container Qdrant
+  # Dữ liệu vector không mất khi container restart
+  volume {
+    name      = "qdrant-storage"
+    host_path = "/qdrant/storage"
+  }
+
   container_definitions = jsonencode([
+    # ── Sidecar: Qdrant vector DB ─────────────────────────────────────────
+    {
+      name  = "qdrant"
+      image = "qdrant/qdrant:latest"
+
+      # Soft limit — có thể dùng thêm RAM nếu host còn trống
+      memoryReservation = 512
+      cpu               = 256
+
+      # essential = true: nếu Qdrant crash → cả task restart
+      # Đảm bảo backend và Qdrant luôn chạy cùng nhau
+      essential = true
+
+      mountPoints = [{
+        sourceVolume  = "qdrant-storage"
+        containerPath = "/qdrant/storage"
+      }]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = "/ecs/${var.project_name}"
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "qdrant"
+          "awslogs-create-group"  = "true"
+        }
+      }
+    },
+
+    # ── Main: FastAPI backend ─────────────────────────────────────────────
     {
       name  = var.container_name
       image = "${aws_ecr_repository.backend.repository_url}:latest"
 
-      cpu    = var.task_cpu
-      memory = var.task_memory
+      memoryReservation = 512
+      cpu               = 256
 
       essential = true
+
+      # Backend chỉ start sau khi Qdrant healthy
+      dependsOn = [{
+        containerName = "qdrant"
+        condition     = "START"
+      }]
 
       portMappings = [{
         containerPort = var.container_port
@@ -48,7 +90,6 @@ resource "aws_ecs_task_definition" "backend" {
         { name = "S3_PRESIGNED_URL_EXPIRY", value = tostring(var.s3_presigned_url_expiry) },
       ]
 
-      # Sensitive values lưu trong SSM SecureString
       secrets = [
         { name = "GEMINI_API_KEY", valueFrom = aws_ssm_parameter.gemini_api_key.arn },
         { name = "S3_ACCESS_KEY_ID", valueFrom = aws_ssm_parameter.s3_access_key_id.arn },
@@ -86,16 +127,15 @@ resource "aws_ecs_service" "backend" {
   desired_count   = var.desired_count
   launch_type     = "EC2"
 
-  # Rolling deploy: ECS giữ ít nhất 100% capacity khi deploy
-  deployment_minimum_healthy_percent = 0   # single instance: cho phép task dừng trước khi start mới
+  # Single instance: cho phép stop task cũ trước khi start task mới
+  deployment_minimum_healthy_percent = 0
   deployment_maximum_percent         = 100
 
-  # Tự động đăng ký lại task mới nhất khi service cập nhật
-  force_new_deployment = true
+  # false = terraform apply không restart container nếu task def không đổi
+  force_new_deployment = false
 
   tags = { Project = var.project_name }
 
-  # Đợi EC2 instance join cluster trước khi tạo service
   depends_on = [aws_instance.ecs_host]
 }
 

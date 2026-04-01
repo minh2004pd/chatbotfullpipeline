@@ -56,6 +56,22 @@ resource "aws_iam_role_policy_attachment" "ecs_task_execution_policy" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
+# AmazonECSTaskExecutionRolePolicy chỉ có CreateLogStream + PutLogEvents
+# Cần thêm CreateLogGroup để awslogs-create-group: true hoạt động
+resource "aws_iam_role_policy" "ecs_task_logs" {
+  name = "${var.project_name}-ecs-task-logs"
+  role = aws_iam_role.ecs_task_execution_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["logs:CreateLogGroup"]
+      Resource = "arn:aws:logs:${var.aws_region}:*:log-group:/ecs/${var.project_name}:*"
+    }]
+  })
+}
+
 # ── IAM Role cho GitHub Actions (CI/CD deploy) ──────────────────────────────
 resource "aws_iam_user" "github_actions" {
   name = "${var.project_name}-github-actions"

@@ -56,6 +56,16 @@ resource "aws_instance" "ecs_host" {
     #!/bin/bash
     echo ECS_CLUSTER=${var.ecs_cluster_name} >> /etc/ecs/ecs.config
     echo ECS_ENABLE_CONTAINER_METADATA=true >> /etc/ecs/ecs.config
+
+    # Tạo Swap 2GB — tránh OOM kill khi traffic đột biến
+    fallocate -l 2G /swapfile
+    chmod 600 /swapfile
+    mkswap /swapfile
+    swapon /swapfile
+    echo '/swapfile none swap sw 0 0' >> /etc/fstab
+
+    # Thư mục persistent storage cho Qdrant (bind mount vào EBS gp3)
+    mkdir -p /qdrant/storage
   EOF
   )
 
