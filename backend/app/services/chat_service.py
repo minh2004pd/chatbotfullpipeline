@@ -4,6 +4,7 @@ import uuid
 from typing import AsyncIterator
 
 import structlog
+from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.runners import InMemorySessionService, Runner
 from google.genai.types import Content, Part
 
@@ -153,12 +154,15 @@ class ChatService:
             max_context_messages=self.settings.max_context_messages,
         )
 
+        run_config = RunConfig(streaming_mode=StreamingMode.SSE)
+
         async for event in self.runner.run_async(
             user_id=request.user_id,
             session_id=session_id,
             new_message=_build_user_content(request),
+            run_config=run_config,
         ):
-            if event.is_final_response() and event.content and event.content.parts:
+            if event.partial and event.content and event.content.parts:
                 for part in event.content.parts:
                     if part.text:
                         yield part.text
