@@ -36,10 +36,10 @@ resource "aws_cloudfront_distribution" "frontend" {
   }
 
   # Origin: EC2 backend (HTTP port 8000)
-  # CloudFront không chấp nhận IP, dùng public DNS của EC2
+  # Dùng Elastic IP DNS — cố định, không đổi khi stop/start EC2
   # VD: ec2-13-211-227-6.ap-southeast-2.compute.amazonaws.com
   origin {
-    domain_name = aws_instance.ecs_host.public_dns
+    domain_name = aws_eip.backend.public_dns
     origin_id   = "ec2-backend"
 
     custom_origin_config {

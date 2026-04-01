@@ -9,13 +9,13 @@ output "ecs_cluster_name" {
 }
 
 output "ec2_public_ip" {
-  description = "Public IP của EC2 instance"
-  value       = aws_instance.ecs_host.public_ip
+  description = "Elastic IP (tĩnh) của EC2 — không đổi khi stop/start"
+  value       = aws_eip.backend.public_ip
 }
 
 output "ec2_public_dns" {
-  description = "Public DNS của EC2 — dùng để test API"
-  value       = "http://${aws_instance.ecs_host.public_dns}:${var.container_port}"
+  description = "Public DNS của EC2 (từ Elastic IP) — dùng để test API"
+  value       = "http://${aws_eip.backend.public_dns}:${var.container_port}"
 }
 
 output "github_actions_access_key_id" {

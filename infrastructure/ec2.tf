@@ -79,3 +79,11 @@ resource "aws_instance" "ecs_host" {
     Name    = "${var.project_name}-ecs-host"
   }
 }
+
+# Elastic IP — IP tĩnh, không thay đổi khi stop/start EC2
+# Chi phí: miễn phí khi EC2 đang chạy, $0.005/giờ (~$3.6/tháng) khi EC2 stopped
+resource "aws_eip" "backend" {
+  instance = aws_instance.ecs_host.id
+  domain   = "vpc"
+  tags     = { Project = var.project_name }
+}
