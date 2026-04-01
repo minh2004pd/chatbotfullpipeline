@@ -6,7 +6,7 @@ from google.adk.tools import ToolContext
 from app.core.config import get_settings
 from app.core.database import get_qdrant_client
 from app.repositories.qdrant_repo import QdrantRepository
-from app.utils.file_utils import extract_pdf_text, chunk_text
+from app.utils.file_utils import chunk_text, extract_pdf_text
 from app.utils.gemini_utils import get_embeddings_batch
 
 logger = structlog.get_logger(__name__)

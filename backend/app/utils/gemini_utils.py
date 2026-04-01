@@ -2,9 +2,9 @@
 
 from functools import lru_cache
 
+import structlog
 from google import genai
 from google.genai import types as genai_types
-import structlog
 
 from app.core.config import get_settings
 from app.core.llm_config import get_llm_config

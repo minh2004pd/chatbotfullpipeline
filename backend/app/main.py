@@ -1,14 +1,15 @@
 """FastAPI application entry point."""
 
-import structlog
 from contextlib import asynccontextmanager
+
+import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.v1 import chat, documents, memory
 from app.core.config import get_settings
 from app.core.database import ensure_collections
 from app.core.logger import setup_logging
-from app.api.v1 import chat, documents, memory
 from app.exceptions.handlers import register_exception_handlers
 
 # Khởi tạo logging

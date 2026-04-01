@@ -1,13 +1,13 @@
 """Utilities cho xử lý file (PDF, images, v.v.)."""
 
+import base64
 import io
 import uuid
-import base64
 from pathlib import Path
 
 import structlog
-from pypdf import PdfReader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from pypdf import PdfReader
 
 logger = structlog.get_logger(__name__)
 

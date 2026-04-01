@@ -1,8 +1,9 @@
 """Tests cho document endpoints."""
 
 import io
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 from httpx import AsyncClient
 
 pytestmark = pytest.mark.usefixtures("mock_qdrant_client")

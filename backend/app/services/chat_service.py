@@ -4,7 +4,7 @@ import uuid
 from typing import AsyncIterator
 
 import structlog
-from google.adk.runners import Runner, InMemorySessionService
+from google.adk.runners import InMemorySessionService, Runner
 from google.genai.types import Content, Part
 
 from app.core.config import Settings

@@ -5,7 +5,7 @@ import structlog
 from app.core.config import Settings
 from app.core.storages import StorageBackend
 from app.repositories.qdrant_repo import QdrantRepository
-from app.utils.file_utils import extract_pdf_text, chunk_text, validate_pdf
+from app.utils.file_utils import chunk_text, extract_pdf_text, validate_pdf
 from app.utils.gemini_utils import get_embeddings_batch, get_query_embedding
 
 logger = structlog.get_logger(__name__)

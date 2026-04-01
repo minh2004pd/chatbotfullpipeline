@@ -1,8 +1,9 @@
-import structlog
 from functools import lru_cache
+
+import structlog
+from mem0 import Memory
 from qdrant_client import AsyncQdrantClient, QdrantClient
 from qdrant_client.models import Distance, VectorParams
-from mem0 import Memory
 
 from app.core.config import get_settings
 from app.core.llm_config import get_llm_config

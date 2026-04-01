@@ -1,12 +1,13 @@
 import uuid
+
 import structlog
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
-    Filter,
     FieldCondition,
+    Filter,
+    FilterSelector,
     MatchValue,
     PointStruct,
-    FilterSelector,
 )
 
 from app.core.config import get_settings
