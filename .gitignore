@@ -36,11 +36,11 @@ backend/uploads/
 CLAUDE.local.md
 
 # Terraform
-infrastructure/.terraform/
-infrastructure/terraform.tfvars
-infrastructure/*.tfstate
-infrastructure/*.tfstate.backup
-infrastructure/.terraform.lock.hcl
+**/.terraform/
+**/terraform.tfvars
+**/*.tfstate
+**/*.tfstate.backup
+**/.terraform.lock.hcl
 
 # IDE
 .vscode/
