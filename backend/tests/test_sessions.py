@@ -113,9 +113,7 @@ async def test_get_session_messages_not_found(client: AsyncClient, mock_dynamo_s
 
 
 @pytest.mark.asyncio
-async def test_get_session_messages_uses_user_id(
-    client: AsyncClient, mock_dynamo_session_service
-):
+async def test_get_session_messages_uses_user_id(client: AsyncClient, mock_dynamo_session_service):
     mock_dynamo_session_service.get_session_messages.return_value = {
         "session_id": "s1",
         "title": "Test",

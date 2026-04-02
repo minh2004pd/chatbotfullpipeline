@@ -1,7 +1,6 @@
 """Unit tests cho DynamoDBSessionService."""
 
 import json
-from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -13,7 +12,6 @@ from app.services.dynamo_session_service import (
     _extract_text,
     _floats_to_decimal,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers fixtures
@@ -199,9 +197,7 @@ async def test_get_session_applies_num_recent_events_filter(service, mock_table)
 
 async def test_delete_session_calls_dynamodb(service, mock_table):
     await service.delete_session(app_name="memrag", user_id="u1", session_id="s1")
-    mock_table.delete_item.assert_called_once_with(
-        Key={"pk": "memrag#u1", "session_id": "s1"}
-    )
+    mock_table.delete_item.assert_called_once_with(Key={"pk": "memrag#u1", "session_id": "s1"})
 
 
 # ---------------------------------------------------------------------------
@@ -305,9 +301,7 @@ async def test_append_event_persists_to_dynamodb(service, mock_table):
     """append_event phải lưu session lên DynamoDB sau khi super() xử lý state."""
     from google.adk.sessions.session import Session
 
-    session = Session(
-        id="s1", app_name="memrag", user_id="u1", state={"user_id": "u1"}, events=[]
-    )
+    session = Session(id="s1", app_name="memrag", user_id="u1", state={"user_id": "u1"}, events=[])
 
     event = MagicMock()
     event.author = "user"

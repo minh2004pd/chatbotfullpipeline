@@ -185,9 +185,7 @@ class DynamoDBSessionService(BaseSessionService):
             if config.num_recent_events is not None:
                 session.events = session.events[-config.num_recent_events :]
             if config.after_timestamp is not None:
-                session.events = [
-                    e for e in session.events if e.timestamp > config.after_timestamp
-                ]
+                session.events = [e for e in session.events if e.timestamp > config.after_timestamp]
 
         return session
 
@@ -214,12 +212,8 @@ class DynamoDBSessionService(BaseSessionService):
             )
         return ListSessionsResponse(sessions=sessions)
 
-    async def delete_session(
-        self, *, app_name: str, user_id: str, session_id: str
-    ) -> None:
-        self._table.delete_item(
-            Key={"pk": self._pk(app_name, user_id), "session_id": session_id}
-        )
+    async def delete_session(self, *, app_name: str, user_id: str, session_id: str) -> None:
+        self._table.delete_item(Key={"pk": self._pk(app_name, user_id), "session_id": session_id})
         logger.info("session_deleted", session_id=session_id, user_id=user_id)
 
     async def append_event(self, session: Session, event: Event) -> Event:
@@ -229,7 +223,11 @@ class DynamoDBSessionService(BaseSessionService):
         # Lấy hoặc cập nhật title
         item = self._get_item(session.app_name, session.user_id, session.id)
         current_title = item.get("title", "New Chat") if item else "New Chat"
-        created_at = item.get("created_at", datetime.now(timezone.utc).isoformat()) if item else datetime.now(timezone.utc).isoformat()
+        created_at = (
+            item.get("created_at", datetime.now(timezone.utc).isoformat())
+            if item
+            else datetime.now(timezone.utc).isoformat()
+        )
 
         if current_title == "New Chat":
             new_title = self._extract_title(event)
@@ -246,9 +244,9 @@ class DynamoDBSessionService(BaseSessionService):
             if key.startswith("app:"):
                 self._app_state.setdefault(session.app_name, {})[key[4:]] = value
             elif key.startswith("user:"):
-                self._user_state.setdefault(session.app_name, {}).setdefault(
-                    session.user_id, {}
-                )[key[5:]] = value
+                self._user_state.setdefault(session.app_name, {}).setdefault(session.user_id, {})[
+                    key[5:]
+                ] = value
 
         return event
 
@@ -268,9 +266,7 @@ class DynamoDBSessionService(BaseSessionService):
         items.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
         return items
 
-    def get_session_messages(
-        self, *, app_name: str, user_id: str, session_id: str
-    ) -> dict | None:
+    def get_session_messages(self, *, app_name: str, user_id: str, session_id: str) -> dict | None:
         """Trả về title + danh sách messages (user + model text only) của session."""
         item = self._get_item(app_name, user_id, session_id)
         if item is None:

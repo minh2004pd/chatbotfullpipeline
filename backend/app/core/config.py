@@ -56,9 +56,9 @@ class Settings(BaseSettings):
     aws_secret_access_key: str = ""
 
     # Context filter & summarization
-    max_context_messages: int = 20   # simple truncation fallback
-    summary_threshold: int = 30      # trigger tóm tắt khi vượt quá số messages này
-    summary_keep_recent: int = 10    # giữ N messages gần nhất sau khi tóm tắt
+    max_context_messages: int = 20  # simple truncation fallback
+    summary_threshold: int = 30  # trigger tóm tắt khi vượt quá số messages này
+    summary_keep_recent: int = 10  # giữ N messages gần nhất sau khi tóm tắt
     chunk_size: int = 1000
     chunk_overlap: int = 200
     top_k_results: int = 5

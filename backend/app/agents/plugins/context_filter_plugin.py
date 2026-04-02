@@ -30,9 +30,7 @@ async def context_filter_before_model(
     Tự động tóm tắt context nếu quá dài.
     """
     settings = get_settings()
-    max_ctx: int = callback_context.state.get(
-        "max_context_messages", settings.max_context_messages
-    )
+    max_ctx: int = callback_context.state.get("max_context_messages", settings.max_context_messages)
 
     contents = llm_request.contents or []
     n = len(contents)

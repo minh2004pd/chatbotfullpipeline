@@ -36,9 +36,7 @@ async def get_session_messages(
     service: SessionServiceDep,
 ) -> SessionMessages:
     """Lấy lịch sử tin nhắn của một session."""
-    result = service.get_session_messages(
-        app_name=APP_NAME, user_id=user_id, session_id=session_id
-    )
+    result = service.get_session_messages(app_name=APP_NAME, user_id=user_id, session_id=session_id)
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session không tồn tại.")
     return SessionMessages(
