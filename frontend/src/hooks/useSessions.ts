@@ -15,12 +15,14 @@ export function useSessions() {
   const resetSession = useChatStore((s) => s.resetSession)
   const addToast = useChatStore((s) => s.addToast)
 
-  const { data: sessions = [], isLoading } = useQuery({
+  const { data: rawSessions, isLoading } = useQuery({
     queryKey: sessionsQueryKey(userId),
     queryFn: getSessions,
     staleTime: 15_000,
     refetchOnWindowFocus: false,
   })
+  // Defensive: đảm bảo luôn là array dù API trả về unexpected format
+  const sessions = Array.isArray(rawSessions) ? rawSessions : []
 
   const deleteMutation = useMutation({
     mutationFn: (sid: string) => deleteSession(sid),

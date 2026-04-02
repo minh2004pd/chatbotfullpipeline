@@ -79,11 +79,11 @@ export const useChatStore = create<ChatStore>()(
     }),
     {
       name: 'memrag-chat-store',
-      // Only persist userId and sessionId, not messages or streaming state
+      version: 2, // bump khi schema thay đổi → Zustand tự clear localStorage cũ
+      // Chỉ persist userId/sessionId; messages được lấy từ DynamoDB khi cần
       partialize: (state) => ({
         userId: state.userId,
         sessionId: state.sessionId,
-        messages: state.messages,
       }),
     },
   ),

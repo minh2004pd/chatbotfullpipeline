@@ -115,10 +115,13 @@ resource "aws_iam_user_policy" "github_actions" {
         Resource = ["*"]
       },
       {
-        Sid      = "PassRole"
-        Effect   = "Allow"
-        Action   = ["iam:PassRole"]
-        Resource = [aws_iam_role.ecs_task_execution_role.arn]
+        Sid    = "PassRole"
+        Effect = "Allow"
+        Action = ["iam:PassRole"]
+        Resource = [
+          aws_iam_role.ecs_task_execution_role.arn,
+          aws_iam_role.ecs_task_role.arn, # cần để register task def có task_role_arn
+        ]
       },
       {
         Sid    = "FrontendS3Deploy"
