@@ -1,6 +1,8 @@
 from functools import lru_cache
 
+import boto3
 import structlog
+from botocore.exceptions import ClientError
 from mem0 import Memory
 from qdrant_client import AsyncQdrantClient, QdrantClient
 from qdrant_client.models import Distance, VectorParams
@@ -109,3 +111,53 @@ async def ensure_collections() -> None:
                 vectors_config=VectorParams(size=target_dim, distance=Distance.COSINE),
             )
             logger.info("collection_ready", name=collection_name, dimension=target_dim)
+
+
+@lru_cache
+def get_dynamodb_resource():
+    """Trả về boto3 DynamoDB resource (singleton per process)."""
+    settings = get_settings()
+    kwargs: dict = {"region_name": settings.dynamodb_region}
+    if settings.dynamodb_endpoint_url:
+        kwargs["endpoint_url"] = settings.dynamodb_endpoint_url
+    if settings.aws_access_key_id:
+        kwargs["aws_access_key_id"] = settings.aws_access_key_id
+        kwargs["aws_secret_access_key"] = settings.aws_secret_access_key
+    elif settings.dynamodb_endpoint_url:
+        # DynamoDB Local không cần credentials thật, nhưng boto3 vẫn cần *gì đó*
+        kwargs["aws_access_key_id"] = "local"
+        kwargs["aws_secret_access_key"] = "local"
+    resource = boto3.resource("dynamodb", **kwargs)
+    logger.info("dynamodb_resource_created", region=settings.dynamodb_region)
+    return resource
+
+
+async def ensure_dynamo_table() -> None:
+    """Tạo DynamoDB table nếu chưa tồn tại (dùng cho local dev; prod dùng IaC)."""
+    settings = get_settings()
+    resource = get_dynamodb_resource()
+    table_name = settings.dynamodb_table_name
+
+    try:
+        table = resource.Table(table_name)
+        table.load()  # raises ResourceNotFoundException nếu chưa có
+        logger.info("dynamo_table_ready", table=table_name)
+    except ClientError as e:
+        if e.response["Error"]["Code"] != "ResourceNotFoundException":
+            raise
+        # Tạo table mới
+        resource.create_table(
+            TableName=table_name,
+            KeySchema=[
+                {"AttributeName": "pk", "KeyType": "HASH"},
+                {"AttributeName": "session_id", "KeyType": "RANGE"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "pk", "AttributeType": "S"},
+                {"AttributeName": "session_id", "AttributeType": "S"},
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        # Chờ table sẵn sàng (chỉ cần thiết với DynamoDB Local sync)
+        resource.Table(table_name).wait_until_exists()
+        logger.info("dynamo_table_created", table=table_name)

@@ -8,18 +8,19 @@ import {
   Edit3,
   Check,
   X,
-  RotateCcw,
+  MessageSquare,
 } from 'lucide-react'
 import { useChatStore } from '@/store/chatStore'
 import DocumentPanel from '@/components/documents/DocumentPanel'
 import MemoryPanel from '@/components/memory/MemoryPanel'
+import SessionList from '@/components/chat/SessionList'
 
-type Section = 'documents' | 'memory'
+type Section = 'sessions' | 'documents' | 'memory'
 
 export default function Sidebar() {
   const { userId, setUserId, resetSession } = useChatStore()
   const [openSections, setOpenSections] = useState<Set<Section>>(
-    new Set(['documents']),
+    new Set(['sessions', 'documents']),
   )
   const [editingUser, setEditingUser] = useState(false)
   const [userIdInput, setUserIdInput] = useState(userId)
@@ -103,15 +104,29 @@ export default function Sidebar() {
             </button>
           </div>
         )}
+      </div>
 
+      {/* Sessions history section */}
+      <div className="border-b border-[#2e2e2e]">
         <button
-          onClick={resetSession}
-          className="mt-2 flex items-center gap-1.5 text-xs text-[#555] hover:text-[#a0a0a0] transition-colors w-full py-1 px-1 rounded hover:bg-[#1e1e1e]"
-          title="Start a new session"
+          onClick={() => toggleSection('sessions')}
+          className="flex items-center gap-2 w-full px-3 py-2.5 text-left hover:bg-[#1e1e1e] transition-colors group"
         >
-          <RotateCcw size={11} />
-          <span>New session</span>
+          <MessageSquare size={14} className="text-violet-400 flex-shrink-0" />
+          <span className="text-xs font-medium text-[#a0a0a0] uppercase tracking-wider flex-1">
+            History
+          </span>
+          {openSections.has('sessions') ? (
+            <ChevronDown size={12} className="text-[#555] group-hover:text-[#a0a0a0] transition-colors" />
+          ) : (
+            <ChevronRight size={12} className="text-[#555] group-hover:text-[#a0a0a0] transition-colors" />
+          )}
         </button>
+        {openSections.has('sessions') && (
+          <div className="pb-1.5">
+            <SessionList />
+          </div>
+        )}
       </div>
 
       {/* Documents section */}

@@ -5,7 +5,8 @@ from typing import AsyncIterator
 
 import structlog
 from google.adk.agents.run_config import RunConfig, StreamingMode
-from google.adk.runners import InMemorySessionService, Runner
+from google.adk.runners import Runner
+from google.adk.sessions.base_session_service import BaseSessionService
 from google.genai.types import Content, Part
 
 from app.core.config import Settings
@@ -59,7 +60,7 @@ def _build_user_content(request: ChatRequest) -> Content:
 
 
 async def _ensure_session(
-    session_service: InMemorySessionService,
+    session_service: BaseSessionService,
     user_id: str,
     session_id: str,
     max_context_messages: int,
@@ -84,7 +85,7 @@ class ChatService:
     def __init__(
         self,
         runner: Runner,
-        session_service: InMemorySessionService,
+        session_service: BaseSessionService,
         settings: Settings,
     ):
         self.runner = runner

@@ -147,3 +147,42 @@ resource "aws_iam_user_policy" "github_actions" {
 resource "aws_iam_access_key" "github_actions" {
   user = aws_iam_user.github_actions.name
 }
+
+# ── IAM Task Role cho container runtime (DynamoDB, v.v.) ─────────────────────
+# Khác với execution role (pull image, logs) — đây là role mà CODE trong container dùng
+resource "aws_iam_role" "ecs_task_role" {
+  name = "${var.project_name}-ecs-task-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+
+  tags = { Project = var.project_name }
+}
+
+resource "aws_iam_role_policy" "ecs_task_dynamodb" {
+  name = "${var.project_name}-ecs-task-dynamodb"
+  role = aws_iam_role.ecs_task_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
+        "dynamodb:UpdateItem",
+        "dynamodb:DescribeTable",
+        "dynamodb:CreateTable",
+      ]
+      Resource = [aws_dynamodb_table.sessions.arn]
+    }]
+  })
+}

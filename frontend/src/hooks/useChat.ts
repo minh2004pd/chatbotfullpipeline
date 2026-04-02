@@ -1,7 +1,11 @@
 import { useCallback, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { streamChat } from '@/api/chat'
 import { useChatStore } from '@/store/chatStore'
-import type { Citation } from '@/types'
+import type { Citation, Session } from '@/types'
+
+// Tránh circular import — định nghĩa inline thay vì import từ useSessions
+const sessionKey = (userId: string) => ['sessions', userId]
 
 export function useChat() {
   const {
@@ -18,6 +22,7 @@ export function useChat() {
     setIsStreaming,
   } = useChatStore()
 
+  const queryClient = useQueryClient()
   const abortControllerRef = useRef<AbortController | null>(null)
 
   const sendMessage = useCallback(
@@ -28,6 +33,8 @@ export function useChat() {
       imagePreview?: string,
     ) => {
       if (isStreaming || !text.trim()) return
+
+      const isFirstMessage = messages.length === 0
 
       // Add user message
       const userMsgId = crypto.randomUUID()
@@ -51,6 +58,24 @@ export function useChat() {
       })
 
       setIsStreaming(true)
+
+      // Optimistic update: hiển thị session mới trong sidebar ngay lập tức
+      if (isFirstMessage) {
+        const now = new Date().toISOString()
+        queryClient.setQueryData<Session[]>(sessionKey(userId), (old = []) => {
+          if (old.some((s) => s.session_id === sessionId)) return old
+          return [
+            {
+              session_id: sessionId,
+              title: text.trim().slice(0, 120),
+              created_at: now,
+              updated_at: now,
+              message_count: 1,
+            },
+            ...old,
+          ]
+        })
+      }
 
       // Set up abort controller
       const controller = new AbortController()
@@ -77,6 +102,8 @@ export function useChat() {
             assistantMsgId,
             collectedCitations.length > 0 ? collectedCitations : undefined,
           )
+          // Sync dữ liệu thật từ server (title chính xác, message_count)
+          queryClient.invalidateQueries({ queryKey: sessionKey(userId) })
         },
         onError: (error) => {
           finalizeStreamingMessage(assistantMsgId, undefined)
@@ -87,8 +114,10 @@ export function useChat() {
     },
     [
       isStreaming,
+      messages,
       sessionId,
       userId,
+      queryClient,
       addMessage,
       updateStreamingMessage,
       finalizeStreamingMessage,

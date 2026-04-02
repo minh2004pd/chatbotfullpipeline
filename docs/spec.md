@@ -28,7 +28,8 @@ MemRAG Chatbot là một chatbot cá nhân hóa đa phương thức (multimodal)
 |-----------------------------|-----------------|
 | **Input**                   | - Text<br>- Upload ảnh (Gemini multimodal)<br>- Upload PDF (RAG) |
 | **RAG Pipeline**            | - Upload PDF → FilesRetrieval Tool (dùng ADK Artifact)<br>- Chunking + embedding (Gemini embedding)<br>- Lưu vào Qdrant collection (per user hoặc global) |
-| **Short-term Memory**       | - ADK Session + **ContextFilterPlugin** (giới hạn context, tránh token explosion) |
+| **Session Persistence**     | - **DynamoDB** lưu toàn bộ lịch sử chat per user (DynamoDB Local dev / AWS prod)<br>- API: list sessions, load messages, delete session<br>- Title auto-extract từ tin nhắn đầu tiên<br>- Sidebar FE hiển thị history, click để resume |
+| **Short-term Memory**       | - ADK Session + **ContextFilterPlugin** (async callback)<br>- Truncation đơn giản khi < threshold<br>- **Auto-summarization**: khi vượt `SUMMARY_THRESHOLD` (default 30 msgs) → Gemini tóm tắt messages cũ, giữ `SUMMARY_KEEP_RECENT` (default 10) messages gần nhất; summary lưu vào session state (persist DynamoDB); FE vẫn hiển thị full history |
 | **Long-term Memory & Personalization** | - **mem0** (store user preferences, summary cuộc trò chuyện, facts cá nhân)<br>- mem0 kết nối Qdrant |
 | **Agent**                   | - Root Agent (Gemini 2.5 Flash / Pro)<br>- Tools: FilesRetrieval, PDFIngestion, QdrantSearch, Mem0Store/Retrieve |
 | **UI/UX**                   | - React + Tailwind + shadcn/ui<br>- Chat hiện đại, hỗ trợ drag & drop file/ảnh<br>- Hiển thị citation từ RAG |
@@ -45,27 +46,30 @@ MemRAG Chatbot là một chatbot cá nhân hóa đa phương thức (multimodal)
 | **RAG Tools** | FilesRetrieval (custom tool dựa trên ADK Artifact) + Qdrant MCP Tool     |
 | **Backend** | Python + FastAPI (hoặc ADK built-in runner) + Docker                     |
 | **Frontend** | React 19 + Vite + TypeScript + Tailwind + shadcn/ui + Axios              |
-| **Docker**  | docker-compose (Qdrant + Backend + optional Redis cho cache)             |
-| **Storage** | Local filesystem (artifacts) + Qdrant                                    |
+| **Session DB** | **DynamoDB** (Local: amazon/dynamodb-local; Prod: AWS DynamoDB)       |
+| **Docker**  | docker-compose (Qdrant + Backend + DynamoDB Local)                       |
+| **Storage** | Local filesystem / S3 (artifacts) + Qdrant                              |
 
 ### 4. Kiến trúc hệ thống (High-level Architecture)
 
 ```
 Người dùng (React FE)
-       ↓ (WebSocket / REST)
+       ↓ (REST / SSE streaming)
 Backend API (FastAPI + ADK Agent)
        ├── ADK Root Agent (Gemini)
-       │     ├── ContextFilterPlugin (short-term memory)
-       │     ├── FilesRetrieval Tool → ADK Artifact → PDF Ingestion
-       │     ├── Qdrant MCP Tool (RAG retrieval)
+       │     ├── ContextFilterPlugin (async) ──→ Truncation / Auto-summarization
+       │     ├── FilesRetrieval Tool → PDF Ingestion → embed → Qdrant
+       │     ├── QdrantSearch Tool (RAG retrieval)
        │     └── mem0 Tools (store/retrieve long-term memory)
+       ├── DynamoDBSessionService ──→ Session history (list/load/delete)
        └── mem0 + Qdrant (long-term & personalization)
 ```
 
 **Flow chính:**
-1. User upload PDF → FilesRetrieval Tool → lưu Artifact → ingest → embed → Qdrant.
-2. Chat (text/ảnh) → ADK Agent → ContextFilterPlugin → retrieve từ Qdrant + mem0 → generate.
-3. Mỗi câu trả lời → mem0 tự động lưu summary/preferences.
+1. User upload PDF → PDF Ingestion Tool → chunk → embed → Qdrant.
+2. Chat (text/ảnh) → ADK Agent → ContextFilterPlugin (truncate hoặc auto-summarize) → retrieve từ Qdrant + mem0 → generate (streaming SSE).
+3. Mỗi turn → ADK `append_event` → `DynamoDBSessionService` persist session + title vào DynamoDB.
+4. Frontend load lại trang → `GET /sessions` → hiển thị history sidebar; click session → `GET /sessions/{id}` → resume.
 
 ### 3. Cấu trúc thư mục toàn dự án (Monorepo)
 
@@ -155,10 +159,16 @@ Dưới đây là các endpoint quan trọng (định nghĩa trong `app/api/v1/`
 | Method | Endpoint                        | Mô tả |
 |--------|----------------------------------|-------|
 | POST   | `/api/v1/chat`                  | Chat với text hoặc ảnh (multimodal) |
+| GET    | `/api/v1/chat/stream`           | Chat streaming (SSE) |
 | POST   | `/api/v1/documents/upload`      | Upload PDF → ingest vào RAG |
 | GET    | `/api/v1/documents`             | List tài liệu đã upload |
+| DELETE | `/api/v1/documents/{id}`        | Xóa tài liệu |
 | POST   | `/api/v1/memory/search`         | Tìm kiếm long-term memory (debug) |
 | GET    | `/api/v1/memory/user/{user_id}` | Lấy thông tin personalization |
+| DELETE | `/api/v1/memory/{memory_id}`    | Xóa memory |
+| GET    | `/api/v1/sessions`              | List các session chat của user (từ DynamoDB) |
+| GET    | `/api/v1/sessions/{session_id}` | Lấy toàn bộ messages của session |
+| DELETE | `/api/v1/sessions/{session_id}` | Xóa session |
 
 ### 6. docker-compose.yml (gợi ý)
 

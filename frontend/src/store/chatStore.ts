@@ -52,6 +52,10 @@ export const useChatStore = create<ChatStore>()(
         set({ sessionId: generateId(), messages: [] })
       },
 
+      loadSession: (sessionId: string, messages: Message[]) => {
+        set({ sessionId, messages, isStreaming: false })
+      },
+
       addToast: (toast: Omit<Toast, 'id'>) => {
         const id = generateId()
         set((state) => ({

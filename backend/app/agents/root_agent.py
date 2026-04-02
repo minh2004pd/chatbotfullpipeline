@@ -5,8 +5,6 @@ Root Agent - Google ADK Agent với đầy đủ tools và ContextFilterPlugin.
 from functools import lru_cache
 
 from google.adk.agents import LlmAgent
-from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
 from google.genai import types as genai_types
 
 from app.agents.plugins.context_filter_plugin import (
@@ -17,11 +15,6 @@ from app.agents.tools.files_retrieval_tool import list_user_documents
 from app.agents.tools.mem0_tools import retrieve_memories, store_memory
 from app.agents.tools.qdrant_search_tool import search_documents
 from app.core.llm_config import get_llm_config
-
-
-@lru_cache
-def get_session_service() -> InMemorySessionService:
-    return InMemorySessionService()
 
 
 @lru_cache
@@ -46,13 +39,4 @@ def get_root_agent() -> LlmAgent:
         ),
         before_model_callback=context_filter_before_model,
         after_model_callback=context_filter_after_model,
-    )
-
-
-@lru_cache
-def get_runner() -> Runner:
-    return Runner(
-        agent=get_root_agent(),
-        app_name="memrag",
-        session_service=get_session_service(),
     )

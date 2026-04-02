@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.agents.root_agent import get_runner, get_session_service
 from app.core.database import get_mem0_client, get_qdrant_client
+from app.core.dependencies import get_dynamo_session_service, get_runner
 from app.main import create_app
 
 
@@ -67,15 +67,30 @@ def mock_mem0_client(app):
     return client
 
 
+# --- Mock DynamoDB Session Service ---
+
+
+@pytest.fixture
+def mock_dynamo_session_service(app):
+    """Mock DynamoDBSessionService — dùng cho chat tests và session tests."""
+    service = MagicMock()
+    service.get_session = AsyncMock(return_value=None)
+    service.create_session = AsyncMock(return_value=MagicMock(id="test-session-id"))
+    service.append_event = AsyncMock(side_effect=lambda session, event: event)
+    service.delete_session = AsyncMock(return_value=None)
+    service.list_sessions_with_metadata = MagicMock(return_value=[])
+    service.get_session_messages = MagicMock(return_value=None)
+
+    app.dependency_overrides[get_dynamo_session_service] = lambda: service
+    return service
+
+
 # --- Mock ADK Runner ---
 
 
 @pytest.fixture
-def mock_runner(app):
+def mock_runner(app, mock_dynamo_session_service):
     runner = MagicMock()
-    session_service = MagicMock()
-    session_service.get_session = AsyncMock(return_value=None)
-    session_service.create_session = AsyncMock(return_value=MagicMock())
 
     async def fake_run_async(**kwargs):
         event = MagicMock()
@@ -90,8 +105,7 @@ def mock_runner(app):
     runner.run_async = fake_run_async
 
     app.dependency_overrides[get_runner] = lambda: runner
-    app.dependency_overrides[get_session_service] = lambda: session_service
-    return runner, session_service
+    return runner, mock_dynamo_session_service
 
 
 # --- Sample PDF bytes ---

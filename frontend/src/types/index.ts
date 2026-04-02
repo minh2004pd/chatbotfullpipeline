@@ -81,6 +81,28 @@ export interface DeleteMemoryResponse {
   message: string
 }
 
+// ─── Session types ───────────────────────────────────────────────────────────────
+
+export interface Session {
+  session_id: string
+  title: string
+  created_at: string
+  updated_at: string
+  message_count: number
+}
+
+export interface SessionMessage {
+  role: 'user' | 'model'
+  content: string
+  timestamp: string
+}
+
+export interface SessionMessages {
+  session_id: string
+  title: string
+  messages: SessionMessage[]
+}
+
 // ─── UI / Store types ────────────────────────────────────────────────────────────
 
 export interface Toast {
@@ -102,6 +124,7 @@ export interface ChatStore {
   clearMessages: () => void
   setUserId: (userId: string) => void
   resetSession: () => void
+  loadSession: (sessionId: string, messages: Message[]) => void
   addToast: (toast: Omit<Toast, 'id'>) => void
   removeToast: (id: string) => void
   setIsStreaming: (value: boolean) => void

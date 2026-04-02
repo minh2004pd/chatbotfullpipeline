@@ -56,15 +56,19 @@ HTTP Request → FastAPI Router (api/v1/) → Service Layer → Repository / ADK
 
 ### Key Design Decisions
 
-**ADK Agent** (`agents/root_agent.py`): Uses `lru_cache` on `get_runner()` and `get_session_service()` — singletons per process. The `Runner` takes `app_name="memrag"` and `InMemorySessionService`. Sessions are created per `(user_id, session_id)` pair via `_ensure_session()` before each `runner.run_async()` call.
+**ADK Agent** (`agents/root_agent.py`): Uses `lru_cache` on `get_runner()` — singleton per process. The `Runner` takes `app_name="memrag"` and `DynamoDBSessionService`. Sessions are created per `(user_id, session_id)` pair via `_ensure_session()` before each `runner.run_async()` call. `get_runner()` is defined in `core/dependencies.py` (not in `root_agent.py`) to avoid circular imports.
 
 **Streaming** (`services/chat_service.py`): `chat_stream` passes `RunConfig(streaming_mode=StreamingMode.SSE)` to `runner.run_async()` — this enables token-level streaming from Gemini. Import: `from google.adk.agents.run_config import RunConfig, StreamingMode`. Yield on `event.partial` (not `event.is_final_response()`) to get incremental chunks.
 
 **Tools vs Services**: The 4 ADK tools (`qdrant_search_tool`, `mem0_tools`, `files_retrieval_tool`, `pdf_ingestion_tool`) are called by the agent during inference. The `RAGService` and `MemoryService` are called directly by HTTP endpoints (upload, list, delete). Both paths share the same repositories.
 
-**ContextFilterPlugin** (`agents/plugins/context_filter_plugin.py`): Implemented as a `before_model_callback` on `LlmAgent`. Reads `max_context_messages` from ADK session state (set when session is created in `chat_service.py`).
+**ContextFilterPlugin** (`agents/plugins/context_filter_plugin.py`): Implemented as an **async** `before_model_callback` on `LlmAgent`. Có 2 chế độ:
+- **Truncation** (đơn giản): khi `max_context_messages < len(contents) < summary_threshold` → giữ N messages cuối.
+- **Summarization** (tự động): khi `len(contents) >= summary_threshold` (default 30) hoặc đã có summary → gọi Gemini tóm tắt messages cũ, lưu `conversation_summary` + `summary_covered_count` vào ADK session state (tự persist DynamoDB), inject `[summary_msg + summary_ack] + recent_messages` vào `llm_request.contents`. Re-summarize khi có thêm `summary_threshold - summary_keep_recent` messages mới. Frontend vẫn load full history từ DynamoDB — chỉ BE dùng summary.
 
-**Database clients** (`core/database.py`): All clients (`get_qdrant_client`, `get_async_qdrant_client`, `get_mem0_client`) use `lru_cache` — single instance per process. `ensure_collections()` is called at app startup in `lifespan`.
+**Database clients** (`core/database.py`): All clients (`get_qdrant_client`, `get_async_qdrant_client`, `get_mem0_client`, `get_dynamodb_resource`) use `lru_cache` — single instance per process. `ensure_collections()` và `ensure_dynamo_table()` đều được gọi at app startup trong `lifespan`.
+
+**Session Persistence** (`services/dynamo_session_service.py`): `DynamoDBSessionService` extends ADK `BaseSessionService`, lưu sessions vào DynamoDB. DynamoDB table key: `PK={app_name}#{user_id}`, `SK=session_id`. Title auto-extracted từ first user message trong `append_event()`. `float` ↔ `Decimal` conversion bắt buộc cho DynamoDB. Docker local dùng `amazon/dynamodb-local` trên port 8001; production dùng AWS DynamoDB (IAM role hoặc env vars). API endpoints: `GET /api/v1/sessions`, `GET /api/v1/sessions/{id}`, `DELETE /api/v1/sessions/{id}`.
 
 **Embeddings** (`utils/gemini_utils.py`): Uses `google.genai.Client` (NOT deprecated `google.generativeai`). Batch embedding in groups of 20 chunks. Uses `RETRIEVAL_DOCUMENT` task type for indexing and `RETRIEVAL_QUERY` task type for search queries. Embedding dimension is 768 (`gemini-embedding-001`).
 
@@ -79,17 +83,20 @@ HTTP Request → FastAPI Router (api/v1/) → Service Layer → Repository / ADK
 - `ALLOWED_ORIGINS` in `.env` must be JSON array format: `["http://localhost:5173"]` (not comma-separated)
 - Docker: config comes entirely from env vars (docker-compose `env_file: .env`). No `.env` file is baked into the image.
 - `QDRANT_URL` is overridden to `http://qdrant:6333` by docker-compose `environment` block, overriding `.env`'s `http://localhost:6333`.
+- `DYNAMODB_ENDPOINT_URL=http://dynamodb-local:8000` được set trong docker-compose `environment` block (local). Để trống = real AWS DynamoDB.
 - **CloudFront reverse proxy**: Production CloudFront distribution routes `/api/*` → EC2 backend (HTTP :8000) and `/*` → S3 frontend. FE is built with `VITE_API_BASE_URL=""` so axios uses relative URLs — same-origin, no CORS needed. `compress=false` on the `/api/*` behavior prevents buffering SSE streams at the edge.
+- **Context summarization config** (tunable via `.env`): `SUMMARY_THRESHOLD=30`, `SUMMARY_KEEP_RECENT=10`, `MAX_CONTEXT_MESSAGES=20`.
 
 ### Dependency Injection
 
 Full FastAPI DI wiring lives in `app/dependencies.py`. The graph:
 ```
-get_qdrant_client() [lru_cache] → get_qdrant_repo() → get_rag_service() → get_document_service()
-get_mem0_client()   [lru_cache] → get_mem0_repo()   → get_memory_service()
-get_runner()        [lru_cache] ─┐
-get_session_service()[lru_cache] ├─ get_chat_service()
-get_settings()      [lru_cache] ─┘
+get_qdrant_client()        [lru_cache] → get_qdrant_repo() → get_rag_service() → get_document_service()
+get_mem0_client()          [lru_cache] → get_mem0_repo()   → get_memory_service()
+get_dynamodb_resource()    [lru_cache] → get_dynamo_session_service() [lru_cache] ─┐
+get_runner()               [lru_cache] ────────────────────────────────────────────┼─ get_chat_service()
+get_settings()             [lru_cache] ────────────────────────────────────────────┘
+                                          get_dynamo_session_service() ─────────────── SessionServiceDep (sessions router)
 ```
 
 Routers use `Annotated` shorthands: `ChatServiceDep`, `DocumentServiceDep`, etc. Services receive all deps via constructor — no global calls inside methods.

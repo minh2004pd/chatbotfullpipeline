@@ -9,6 +9,14 @@ services:
       - qdrant_data:/qdrant/storage
     restart: unless-stopped
 
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: memrag-dynamodb
+    ports:
+      - "8001:8000"
+    command: "-jar DynamoDBLocal.jar -inMemory -sharedDb"
+    restart: unless-stopped
+
   backend:
     build: ./backend
     container_name: memrag-backend
@@ -16,10 +24,12 @@ services:
       - "8000:8000"
     depends_on:
       - qdrant
+      - dynamodb-local
     env_file:
       - .env
     environment:
       - QDRANT_URL=http://qdrant:6333
+      - DYNAMODB_ENDPOINT_URL=http://dynamodb-local:8000
     volumes:
       - uploads_data:/app/uploads
     restart: unless-stopped
@@ -30,3 +40,4 @@ volumes:
 
 # http://0.0.0.0:8000/docs
 # http://localhost:6333/dashboard
+# http://localhost:8001  (DynamoDB Local — dùng AWS CLI hoặc NoSQLWorkbench để xem)

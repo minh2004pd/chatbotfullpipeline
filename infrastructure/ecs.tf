@@ -14,6 +14,7 @@ resource "aws_ecs_task_definition" "backend" {
   family             = var.ecs_task_family
   network_mode       = "host" # cả 2 container dùng chung network EC2 host
   execution_role_arn = aws_iam_role.ecs_task_execution_role.arn
+  task_role_arn      = aws_iam_role.ecs_task_role.arn # runtime role cho DynamoDB access
 
   cpu    = var.task_cpu
   memory = var.task_memory
@@ -88,6 +89,9 @@ resource "aws_ecs_task_definition" "backend" {
         { name = "S3_ENDPOINT_URL", value = var.s3_endpoint_url },
         { name = "S3_PREFIX", value = var.s3_prefix },
         { name = "S3_PRESIGNED_URL_EXPIRY", value = tostring(var.s3_presigned_url_expiry) },
+        # DynamoDB — không set DYNAMODB_ENDPOINT_URL → dùng real AWS; IAM task role xử lý auth
+        { name = "DYNAMODB_TABLE_NAME", value = aws_dynamodb_table.sessions.name },
+        { name = "DYNAMODB_REGION", value = var.aws_region },
       ]
 
       secrets = [
