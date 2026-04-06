@@ -62,8 +62,9 @@ export function useChat() {
       // Optimistic update: hiển thị session mới trong sidebar ngay lập tức
       if (isFirstMessage) {
         const now = new Date().toISOString()
-        queryClient.setQueryData<Session[]>(sessionKey(userId), (old = []) => {
-          if (old.some((s) => s.session_id === sessionId)) return old
+        queryClient.setQueryData<Session[]>(sessionKey(userId), (old) => {
+          const list = Array.isArray(old) ? old : []
+          if (list.some((s) => s.session_id === sessionId)) return list
           return [
             {
               session_id: sessionId,
@@ -72,7 +73,7 @@ export function useChat() {
               updated_at: now,
               message_count: 1,
             },
-            ...old,
+            ...list,
           ]
         })
       }

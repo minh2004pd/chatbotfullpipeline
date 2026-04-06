@@ -11,7 +11,9 @@ export const setUserIdInStorage = (userId: string): void => {
   localStorage.setItem(USER_ID_KEY, userId)
 }
 
-const baseURL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:8000'
+// "" = relative URL → CloudFront proxy /api/* → EC2 (production & default)
+// Set VITE_API_BASE_URL=http://localhost:8000 trong .env.local khi dev local
+const baseURL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ''
 
 export const apiClient = axios.create({
   baseURL,
