@@ -125,8 +125,13 @@ Key async mock rules:
 - `session_service.get_session` / `create_session` → `AsyncMock`
 - `runner.run_async` → `async def fake(**kwargs): yield event` (async generator)
 
+## Git Conventions
+
+Use **Conventional Commits**: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`. Example: `feat: add voice transcription to RAG pipeline`.
+
 ## Working with Claude
 
 - Propose a plan before implementing; explain tradeoffs when suggesting changes.
 - Vietnamese comments and responses are fine.
+- Update `docs/` after adding or changing a feature.
 - Changing embedding dimension requires a full Qdrant reset: `docker compose down -v && docker compose up -d` (all data lost).

@@ -35,28 +35,27 @@ resource "aws_cloudfront_distribution" "frontend" {
     origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
   }
 
-  # Origin: EC2 backend (HTTP port 8000)
-  # Dùng Elastic IP DNS — cố định, không đổi khi stop/start EC2
-  # VD: ec2-13-211-227-6.ap-southeast-2.compute.amazonaws.com
+  # Origin: ALB backend (HTTP port 80)
+  # ALB thay thế EC2 Elastic IP — DNS không đổi, supports multiple backend tasks
   origin {
-    domain_name = aws_eip.backend.public_dns
-    origin_id   = "ec2-backend"
+    domain_name = aws_lb.backend.dns_name
+    origin_id   = "alb-backend"
 
     custom_origin_config {
-      http_port              = 8000
+      http_port              = 80
       https_port             = 443
       origin_protocol_policy = "http-only"
       origin_ssl_protocols   = ["TLSv1.2"]
     }
   }
 
-  # Behavior: /api/* → EC2 backend (evaluated trước default)
+  # Behavior: /api/* → ALB backend (evaluated trước default)
   # Dùng AWS Managed Policies:
   #   CachingDisabled            = 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
   #   AllViewerExceptHostHeader  = b689b0a8-53d0-40ab-baf2-68738e2966ac
   ordered_cache_behavior {
     path_pattern     = "/api/*"
-    target_origin_id = "ec2-backend"
+    target_origin_id = "alb-backend"
 
     viewer_protocol_policy = "https-only"
     allowed_methods        = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]

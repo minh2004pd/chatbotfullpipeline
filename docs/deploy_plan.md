@@ -1,5 +1,7 @@
 # Kiến trúc Cloud — MemRAG Chatbot
 
+> Cập nhật lần cuối: 2026-04-07
+
 ## Sơ đồ tổng thể
 
 ```
@@ -11,51 +13,63 @@ Internet
 │                                                                  │
 │  ┌──────────────────────────────────────────────────────────┐   │
 │  │              CloudFront Distribution                      │   │
+│  │              https://d3qrt08bgfyl3d.cloudfront.net       │   │
 │  │                                                          │   │
 │  │   /api/*  ──────────────────────────────────────────┐   │   │
-│  │   (Reverse Proxy, no cache)                         │   │   │
-│  │                                                     ▼   │   │
-│  │   /*      ──► S3 Bucket (frontend static files)     │   │   │
-│  │               index.html, assets/*, ...             │   │   │
-│  └─────────────────────────────────────────────────────┼───┘   │
-│                                                        │        │
-│                    HTTP :8000 (EC2 public DNS)         │        │
-│  ┌─────────────────────────────────────────────────────▼────┐  │
-│  │           EC2 Instance t3.small (EBS gp3 30GB)           │  │
-│  │                                                          │  │
-│  │  ┌───────────────────────────────────────────────────┐   │  │
-│  │  │           ECS Task (network_mode=host)             │   │  │
-│  │  │                                                   │   │  │
-│  │  │  ┌─────────────────┐  ┌──────────────────────┐   │   │  │
-│  │  │  │ Container:      │  │ Container:           │   │   │  │
-│  │  │  │ qdrant          │  │ backend              │   │   │  │
-│  │  │  │ :6333           │  │ FastAPI :8000        │   │   │  │
-│  │  │  │ /qdrant/storage │  │ → localhost:6333     │   │   │  │
-│  │  │  │ (EBS bind mount)│  │ → SSM secrets        │   │   │  │
-│  │  │  └─────────────────┘  │ → S3 uploads         │   │   │  │
-│  │  │    ↑ HEALTHY check    │ → Gemini API         │   │   │  │
-│  │  │    trước khi backend  └──────────────────────┘   │   │  │
-│  │  │    được start                                     │   │  │
-│  │  └───────────────────────────────────────────────────┘   │  │
-│  │                                                          │  │
-│  │  Swap: 2GB (file trên EBS) — chống OOM kill             │  │
-│  └──────────────────────────────────────────────────────────┘  │
+│  │   (Reverse Proxy, no cache, compress=false)          │   │   │
+│  │                                                      ▼   │   │
+│  │   /*      ──► S3 Bucket (frontend static files)      │   │   │
+│  │               memrag-frontend-860601623933           │   │   │
+│  └──────────────────────────────────────────────────────┼───┘   │
+│                                                         │        │
+│                    HTTP :80 (ALB)                       │        │
+│  ┌──────────────────────────────────────────────────────▼────┐  │
+│  │         Application Load Balancer (internet-facing)        │  │
+│  │         memrag-backend-alb (public subnets AZ-a, AZ-b)    │  │
+│  └───────────────────────────┬────────────────────────────────┘  │
+│                               │ HTTP :8000 (target group, awsvpc) │
+│  ┌──────────────────────────  │  ──────────────────────────────┐  │
+│  │      EC2 t3.small (EBS gp3 30GB root)                      │  │
+│  │      Private subnet AZ-a — memrag-ecs-host-new             │  │
+│  │                                                            │  │
+│  │  ┌───────────────────────────────────────────────────┐    │  │
+│  │  │  ECS Task: backend (awsvpc, private subnet)        │    │  │
+│  │  │  Container: FastAPI :8000                          │    │  │
+│  │  │    → qdrant.memrag.local:6333 (Cloud Map DNS)      │    │  │
+│  │  │    → AWS DynamoDB                                  │    │  │
+│  │  │    → S3 (file uploads)                             │    │  │
+│  │  │    → Gemini API (LLM+embed)                        │    │  │
+│  │  │    → Soniox API (STT WS)                           │    │  │
+│  │  └───────────────────────────────────────────────────┘    │  │
+│  │                                                            │  │
+│  │  ┌───────────────────────────────────────────────────┐    │  │
+│  │  │  ECS Task: qdrant (awsvpc, private subnet AZ-a)    │    │  │
+│  │  │  Container: qdrant/qdrant:latest :6333             │    │  │
+│  │  │    → /qdrant/storage (EBS 20GB gp3 bind mount)     │    │  │
+│  │  │  Cloud Map: qdrant.memrag.local → task IP          │    │  │
+│  │  └───────────────────────────────────────────────────┘    │  │
+│  │  Swap: 2GB (EBS) — chống OOM kill                         │  │
+│  └────────────────────────────────────────────────────────────┘  │
 │                                                                  │
-│  ┌──────────┐  ┌──────────┐  ┌────────────────────────────┐   │
-│  │   ECR    │  │   SSM    │  │             S3              │   │
-│  │ (images) │  │(secrets) │  │  uploads/  │  frontend/    │   │
-│  └──────────┘  └──────────┘  │ (PDF files)│ (React build) │   │
-│                               └────────────────────────────┘   │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌───────────────┐  │
+│  │   ECR    │  │   SSM    │  │ DynamoDB │  │      S3       │  │
+│  │ (images) │  │(secrets) │  │(sessions │  │ uploads/ +    │  │
+│  └──────────┘  └──────────┘  │+meetings)│  │ frontend/     │  │
+│                               └──────────┘  └───────────────┘  │
 │                                                                  │
 │  CloudWatch Logs: /ecs/memrag                                   │
 │  ├── backend/backend/<task-id>                                   │
-│  └── qdrant/qdrant/<task-id>                                     │
+│  └── qdrant-new/qdrant/<task-id>                                 │
+│                                                                  │
+│  External APIs (không containerized):                           │
+│  ├── Soniox STT WebSocket (stt.soniox.com) — realtime STT      │
+│  └── Google Gemini API — LLM + embeddings                       │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 **URL duy nhất cho user:** `https://d3qrt08bgfyl3d.cloudfront.net`
 - `/*` → React SPA (từ S3)
-- `/api/*` → FastAPI backend (reverse proxy qua EC2)
+- `/api/*` → FastAPI backend (qua ALB → ECS backend task)
 
 ---
 
@@ -69,191 +83,169 @@ Internet
 
 | Behavior | Path Pattern | Origin | Cache |
 |----------|-------------|--------|-------|
-| API proxy | `/api/*` | EC2 public DNS :8000 | Disabled |
-| Frontend | `/*` (default) | S3 bucket | 1 ngày (assets), no-cache (index.html) |
+| API proxy | `/api/*` | ALB (HTTP :80) | Disabled |
+| Frontend | `/*` (default) | S3 bucket (OAC) | 1 ngày (assets), no-cache (index.html) |
 
-**Tại sao dùng CloudFront làm Reverse Proxy thay vì domain riêng cho backend:**
-- Giải quyết **Mixed Content**: CloudFront serving HTTPS, browser chỉ thấy 1 domain duy nhất — không có HTTP/HTTPS mismatch
-- **Same-origin**: FE và API cùng domain → browser không gửi CORS preflight → không cần cấu hình CORS phức tạp
-- **Không tốn thêm tiền**: Không cần Load Balancer ($18/tháng) hay ACM cert riêng
-- `compress = false` trên `/api/*` behavior → SSE streaming (chat) không bị buffer tại edge
+**Tại sao dùng CloudFront làm Reverse Proxy:**
+- **Mixed Content**: CloudFront serving HTTPS, browser chỉ thấy 1 domain duy nhất
+- **Same-origin**: FE và API cùng domain → không cần CORS
+- `compress = false` trên `/api/*` → SSE streaming (chat + transcription) không bị buffer tại edge
 
-**SPA routing (custom error pages):**
-- S3 trả về 403/404 khi path không phải file thực (VD: `/chat`, `/documents`)
-- CloudFront map 403/404 → `index.html` với status 200 → React Router xử lý routing
+**SPA routing:** S3 trả 403/404 khi path không phải file thực → CloudFront map → `index.html` (status 200) → React Router xử lý.
+
+---
+
+### VPC & Networking
+
+**VPC:** `10.0.0.0/16` — memrag-vpc
+
+| Subnet | CIDR | AZ | Dùng cho |
+|--------|------|----|----------|
+| Public AZ-a | 10.0.1.0/24 | ap-southeast-2a | ALB |
+| Public AZ-b | 10.0.2.0/24 | ap-southeast-2b | ALB |
+| Private AZ-a | 10.0.10.0/24 | ap-southeast-2a | EC2 host, backend task, qdrant task |
+| Private AZ-b | 10.0.11.0/24 | ap-southeast-2b | Backend task (failover) |
+
+- **NAT Gateway** (public AZ-a) → private subnets có outbound internet (ECR pull, Gemini API, Soniox)
+- **S3 Gateway Endpoint** + **DynamoDB Gateway Endpoint** → traffic không qua NAT (miễn phí)
+
+---
+
+### Application Load Balancer
+
+- Internet-facing, đặt ở 2 public subnets (AZ-a, AZ-b)
+- Listener HTTP :80 → forward đến target group `memrag-backend-tg` (type=ip, port=8000)
+- Health check: `GET /health` (30s interval, 3 unhealthy threshold)
+- SG: chỉ nhận HTTP/HTTPS từ internet (0.0.0.0/0) — CloudFront restriction qua custom header nếu cần
 
 ---
 
 ### S3 — Frontend static files
 
-**Làm gì:** Lưu React/Vite build output (`dist/`), phục vụ qua CloudFront OAC.
+**Bucket:** `memrag-frontend-860601623933`
 
-**Private bucket + OAC (Origin Access Control):**
-- Bucket không public — chỉ CloudFront mới đọc được (via bucket policy `AWS:SourceArn`)
-- OAC thay thế OAI cũ — signing bằng SigV4, bảo mật hơn
-
-**Cache strategy:**
-- `assets/*` (JS/CSS với content hash) → `max-age=31536000,immutable` (cache 1 năm, safe vì hash thay đổi theo content)
-- `index.html` → `no-cache,no-store` (browser luôn lấy bản mới → deploy xong user thấy ngay)
+- Private bucket + OAC (Origin Access Control, SigV4)
+- `assets/*` → `max-age=31536000,immutable` (content hash thay đổi theo content)
+- `index.html` → `no-cache,no-store` (user thấy deploy mới ngay)
 
 ---
 
-### EC2 t3.small
+### EC2 t3.small — ECS Host
 
-**Làm gì:** Máy chủ vật lý chạy ECS agent và tất cả containers trong 1 ECS Task.
-
-**Tại sao t3.small (2 vCPU, 2GB RAM):**
-- t3.micro (1GB) không đủ — Qdrant + FastAPI + ECS agent cần ~1.2GB RAM
-- t3.medium (4GB) dư thừa cho giai đoạn đầu, tốn kém hơn không cần thiết
-- t3 là "burstable" — baseline CPU thấp, burst khi có request thật
-
-**EBS gp3 30GB:**
-- Root volume chứa OS, Docker images, ECS agent
-- `/qdrant/storage` bind mount vào đây → Qdrant data persistent qua các lần restart container
-
-**Swap 2GB (file trên EBS):**
-- Khi RAM đầy (VD: nhiều request đồng thời), Linux dùng swap thay vì OOM kill process
-- Swap chậm hơn RAM ~10x nhưng tốt hơn là container bị kill đột ngột
-- Được tạo tự động qua `user_data` khi EC2 khởi tạo, mount vĩnh viễn vào `/etc/fstab`
-
-**Tại sao không dùng Fargate:**
-- Fargate = serverless container, không cần quản lý EC2 nhưng không support bind mount trực tiếp vào EBS
-- Qdrant cần persistent storage đơn giản → EC2 bind mount là giải pháp tự nhiên nhất
-- EC2 rẻ hơn Fargate ~30-40% cho workload chạy liên tục
+- 2 vCPU, 2GB RAM
+- **Root EBS gp3 30GB**: OS + Docker + ECS agent
+- **Data EBS gp3 20GB** (`/dev/xvdf`, mount `/qdrant/storage`): Qdrant data persist
+- Swap 2GB (file trên root EBS): chống OOM kill
+- Đặt ở **private subnet AZ-a** — cùng AZ với Qdrant EBS
+- `ECS_ENABLE_TASK_ENI=true` → awsvpc mode support cho nhiều task
 
 ---
 
-### ECS (Elastic Container Service) — Sidecar Pattern
+### ECS — Hai service độc lập
 
-**Làm gì:** Quản lý vòng đời cả 2 containers (backend + Qdrant) trong cùng 1 Task.
+**Backend service** (`memrag-backend-service`):
 
-**Tại sao Sidecar Pattern (Qdrant trong cùng ECS Task):**
+| Config | Giá trị | Lý do |
+|--------|---------|-------|
+| `network_mode` | `awsvpc` | Mỗi task có ENI riêng, dễ scale |
+| `desiredCount` | `1` | Single instance |
+| `deployment_minimum_healthy_percent` | `0` | Stop old → start new (~30-60s downtime) |
+| Load balancer | ALB target group | ALB route traffic đến task IP trực tiếp |
+| Qdrant URL | `qdrant.memrag.local:6333` | Cloud Map DNS |
 
-Trước đây: Qdrant chạy bằng `docker run --restart unless-stopped` thủ công trên EC2.
-- Vấn đề: ECS không biết Qdrant đang chạy → không quản lý được lifecycle
-- Khi deploy backend mới, ECS restart task → Qdrant vẫn chạy → OK
-- Nhưng: Qdrant crash → phải SSH vào restart tay, không có alerting
+**Qdrant service** (`memrag-qdrant-service`):
 
-Sau khi đổi sang Sidecar:
-- ECS quản lý cả 2 containers trong cùng 1 Task
-- Qdrant crash → ECS tự restart toàn bộ Task (cả backend lẫn Qdrant)
-- Logs của cả 2 containers đều vào CloudWatch
-
-**`network_mode = "host"`:**
-- Cả 2 container dùng chung network namespace của EC2 host
-- Backend gọi `localhost:6333` → gặp Qdrant trong cùng task (không cần service discovery)
-- Không cần mở port giữa containers, không overhead routing
-
-**`dependsOn: condition: "HEALTHY"`:**
-- Backend chỉ start sau khi Qdrant healthcheck `/readyz` trả về 200
-- Tránh lỗi `connection refused` khi backend start trước Qdrant còn đang khởi tạo
-
-**`essential = true` cho cả 2:**
-- Nếu 1 trong 2 crash → toàn bộ Task dừng → ECS tự restart Task mới
-- Đảm bảo backend và Qdrant luôn live/die cùng nhau, không có trạng thái "backend running, Qdrant dead"
-
-**`deployment_minimum_healthy_percent = 0`:**
-- Single instance → chỉ có 1 task slot
-- Nếu để 100%: ECS cần start task mới TRƯỚC khi stop task cũ → không đủ port (host network)
-- Để 0%: ECS stop task cũ rồi start task mới → ~30-60s downtime khi deploy, chấp nhận được
-
-**`force_new_deployment = false`:**
-- `terraform apply` không restart container nếu task definition không thay đổi
-- CI/CD pipeline tự register task def mới (với image SHA mới) → ECS tự rolling deploy
+| Config | Giá trị | Lý do |
+|--------|---------|-------|
+| `network_mode` | `awsvpc` | ENI riêng |
+| `desiredCount` | `1` | Single instance (EBS gắn cố định AZ-a) |
+| Placement constraint | AZ-a only | EBS volume ở AZ-a |
+| Storage | bind mount `/qdrant/storage` từ EBS | Data persist qua restart |
+| Health check | Không dùng container healthCheck | `qdrant/qdrant` image không có curl/wget/python |
+| Cloud Map | `qdrant.memrag.local` | Backend resolve qua DNS nội bộ |
 
 ---
 
-### ECR (Elastic Container Registry)
+### Cloud Map — Service Discovery
 
-**Làm gì:** Kho lưu Docker images, giống Docker Hub nhưng private trong AWS.
-
-**Tại sao không dùng Docker Hub:**
-- Docker Hub free tier có pull rate limit (100 pulls/6h per IP)
-- ECR nằm trong cùng AWS network với EC2 → pull image không tốn bandwidth ra internet, nhanh hơn
-- Tích hợp IAM — EC2 instance dùng instance profile để pull, không cần username/password
-
-**Lifecycle policy giữ 10 images:**
-- Mỗi CI/CD push tạo 1 image mới tag theo commit SHA (immutable)
-- Không giới hạn → tích lũy hàng trăm images → tốn tiền lưu trữ ($0.10/GB/tháng)
-- Giữ 10 = rollback được về 10 commit gần nhất
+- Namespace: `memrag.local` (private DNS, gắn với VPC)
+- Service: `qdrant` → `qdrant.memrag.local:6333`
+- Khi ECS Qdrant task start → tự đăng ký IP vào Cloud Map → backend resolve được ngay
 
 ---
 
-### SSM Parameter Store (secrets)
+### DynamoDB — Session & Meeting Storage
 
-**Làm gì:** Lưu trữ secrets dưới dạng encrypted, inject vào container lúc runtime qua ECS.
+**2 tables:**
 
-**Tại sao không để trong task definition / environment vars:**
-- Task definition lưu trên AWS → ai có quyền đọc ECS đều thấy plaintext
-- SSM SecureString = encrypted bằng KMS key của AWS, chỉ ECS task execution role mới đọc được
-- Rotate key → chỉ update SSM value, không cần redeploy container
+| Table | PK | SK | Dữ liệu |
+|-------|----|----|---------|
+| `memrag_sessions` | `{app_name}#{user_id}` | `session_id` | Chat history, session title, ADK state |
+| `memrag-meetings` | `USER#{user_id}` hoặc `MEETING#{id}` | `MEETING#{id}` hoặc `UTTERANCE#{ts}#{seq}` | Meeting metadata + utterances |
 
-**Tại sao không dùng Secrets Manager:**
-- Secrets Manager: $0.40/secret/tháng → 3 secrets = $1.2/tháng
-- SSM SecureString: miễn phí với standard tier
-- Secrets Manager phù hợp khi cần auto-rotation (tự động đổi DB password) — không cần ở đây
+- **Production:** AWS DynamoDB — backend dùng IAM task role, không cần credentials
+- **Lưu ý:** `float` ↔ `Decimal` conversion bắt buộc. Tables tự tạo khi app startup.
+
+---
+
+### ECR — Container Registry
+
+- Repository: `memragbackend`
+- Image tag: commit SHA (immutable) + `latest`
+- Lifecycle policy: giữ 10 images gần nhất → rollback 10 commit
+
+---
+
+### SSM Parameter Store — Secrets
+
+| Parameter | Mô tả |
+|-----------|-------|
+| `/memrag/GEMINI_API_KEY` | Google AI Studio API key |
+| `/memrag/SONIOX_API_KEY` | Soniox realtime STT API key |
+| `/memrag/S3_ACCESS_KEY_ID` | S3 upload credentials |
+| `/memrag/S3_SECRET_ACCESS_KEY` | S3 upload credentials |
 
 ---
 
 ### S3 — PDF uploads
 
-**Làm gì:** Lưu file PDF người dùng upload, persistent ngoài EC2.
-
-**Tại sao không lưu trên EC2:**
-- ECS task restart → container mới mount `/app/uploads` trống → mất hết file
-- S3 = persistent, durable (11 nines), unlimited capacity
-- Không cần quản lý disk space
-
-**Presigned URL (expiry 3600s = 1h):**
-- File private, không public trực tiếp qua URL
-- Backend ký URL tạm → client download thẳng từ S3 (không qua backend → tiết kiệm bandwidth)
-- URL hết hạn sau 1h → bảo mật
+- Bucket: `chatbotdeploytestv1`
+- Presigned URL (expiry 3600s) để download
+- Backend stream file thẳng từ S3 khi đọc PDF cho RAG
 
 ---
 
 ### IAM — Principle of Least Privilege
 
 ```
-ec2-instance-role       → EC2 join ECS cluster, pull image từ ECR
-ecs-task-execution-role → ECS agent pull image, đọc SSM, ghi CloudWatch logs
-github-actions-user     → push ECR, deploy ECS, sync S3 frontend, invalidate CloudFront
+ec2-instance-role         → EC2 join ECS cluster, pull ECR image, read DynamoDB, read/write S3
+ecs-task-execution-role   → ECS agent pull image, read SSM secrets, write CloudWatch logs
+github-actions-user       → push ECR, deploy ECS, sync S3 frontend, invalidate CloudFront
 ```
 
-- GitHub Actions bị compromise → chỉ deploy được, không đọc SSM secrets, không xóa resource
-- Container bị compromise → không push image mới lên ECR
+---
+
+### Auto Scaling
+
+- Target tracking: CPU > 60% → scale out backend tasks
+- Scale out cooldown: 60s, scale in cooldown: 300s
+- Min: 1, Max: 4 tasks (giới hạn bởi EC2 ENI count — t3.small max 3 ENIs)
+
+---
+
+### Soniox — External STT API
+
+- Kết nối qua WebSocket (`websockets.asyncio.client` v14+)
+- Backend duy trì module-level `_sessions` dict (singleton per process)
+- Cần `SONIOX_API_KEY` trong SSM
 
 ---
 
 ### CloudWatch Logs
 
 **Log groups:** `/ecs/memrag`
-- Stream `backend/backend/<task-id>` — FastAPI application logs
-- Stream `qdrant/qdrant/<task-id>` — Qdrant server logs
-
-**Tại sao cần CloudWatch thay vì `docker logs`:**
-- `docker logs` chỉ xem được khi SSH vào EC2, không xem được log cũ sau khi container restart
-- CloudWatch giữ lịch sử, searchable, có thể set alert (VD: alert khi log có "ERROR")
-- Logs persist dù container bị replace hoàn toàn
-
-**`awslogs-create-group: true`:**
-- Log group tự động tạo khi container start lần đầu
-- Yêu cầu execution role có `logs:CreateLogGroup` (thêm vào IAM ngoài managed policy mặc định)
-
----
-
-### Qdrant — self-hosted (Sidecar)
-
-**Làm gì:** Vector database lưu embeddings cho RAG (PDF search) và mem0 (long-term memory).
-
-**Tại sao không dùng Qdrant Cloud:**
-- Free tier giới hạn 1GB RAM, 0.5 vCPU — không đủ cho cả RAG + mem0
-- Self-host chia sẻ resource với backend trên t3.small → tiết kiệm chi phí
-- Data không ra ngoài AWS network
-
-**Persistent storage (`/qdrant/storage` bind mount):**
-- Qdrant lưu vectors tại `/qdrant/storage` trong container
-- Bind mount vào `/qdrant/storage` trên EBS → data survive qua container restart
-- ECS task restart → container mới mount lại cùng path trên EBS → data intact
+- Stream `backend/backend/<task-id>` — FastAPI logs
+- Stream `qdrant-new/qdrant/<task-id>` — Qdrant server logs
 
 ---
 
@@ -268,7 +260,20 @@ github-actions-user     → push ECR, deploy ECS, sync S3 frontend, invalidate C
     trigger: push frontend/** hoặc deploy-frontend.yml
 ```
 
-**GitHub Secrets cần thiết:**
+### Backend CI/CD (ci-cd.yml)
+
+1. **lint** — `uv run ruff format --check .` + `uv run ruff check .`
+2. **test** — `uv run pytest tests/ -v --cov=app` (GEMINI_API_KEY=dummy-ci-key)
+3. **build-push** — ECR login → `docker build` → push `$REGISTRY/$ECR_REPOSITORY:$SHA` + `latest`
+4. **deploy** — Download task def → render new image → `ecs deploy` với wait-for-stability
+
+### Frontend CI/CD (deploy-frontend.yml)
+
+1. `npm ci` + `npm run build` (`VITE_API_BASE_URL=""`)
+2. `aws s3 sync dist/ s3/$FRONTEND_S3_BUCKET` (immutable assets, no-cache index.html)
+3. `aws cloudfront create-invalidation --paths "/*"`
+
+### GitHub Secrets cần thiết
 
 | Secret | Dùng bởi | Giá trị |
 |--------|----------|---------|
@@ -279,16 +284,20 @@ github-actions-user     → push ECR, deploy ECS, sync S3 frontend, invalidate C
 
 ---
 
-## Tóm tắt lý do cho từng config quan trọng
+## Tóm tắt config quan trọng
 
 | Config | Giá trị | Lý do |
 |--------|---------|-------|
-| `network_mode` | `host` | Backend + Qdrant dùng chung localhost, không cần service discovery |
-| `dependsOn condition` | `HEALTHY` | Backend không start khi Qdrant chưa sẵn sàng |
-| `essential` (cả 2 containers) | `true` | Live/die cùng nhau, ECS tự restart khi 1 trong 2 crash |
-| `deployment_minimum_healthy_percent` | `0` | Single instance, không đủ resource để chạy 2 tasks song song |
-| `force_new_deployment` | `false` | `terraform apply` không restart container nếu không có thay đổi thực sự |
-| Swap 2GB | file trên EBS | Chống OOM kill khi traffic đột biến, không cần nâng instance type |
+| `network_mode` | `awsvpc` | Mỗi task có ENI riêng, ALB target type = ip |
+| Qdrant health check | Không dùng | `qdrant/qdrant` image không có curl/wget/python |
+| Qdrant placement | AZ-a only | EBS bind mount cố định AZ |
+| Cloud Map DNS | `qdrant.memrag.local` | Backend → Qdrant nội bộ VPC |
+| `deployment_minimum_healthy_percent` | `0` | Single instance, không đủ resource chạy 2 tasks song song |
+| Swap 2GB | file trên root EBS | Chống OOM kill khi traffic đột biến |
 | EBS bind mount | `/qdrant/storage` | Qdrant data persist qua container restart |
-| CloudFront `/api/*` behavior | `compress=false` | SSE streaming (chat) không bị buffer tại CloudFront edge |
-| `VITE_API_BASE_URL` | `""` (empty) | FE dùng relative URL → same-origin với CloudFront → không cần CORS |
+| CloudFront `/api/*` | `compress=false` | SSE streaming (chat + transcription) không bị buffer |
+| `VITE_API_BASE_URL` | `""` (empty) | FE dùng relative URL → same-origin → không cần CORS |
+| DynamoDB tables | auto-created | `ensure_dynamo_table()` + `ensure_meetings_table()` khi app startup |
+| Embedding model | `gemini-embedding-001` | 768-dim — phải reset Qdrant nếu đổi model |
+| Audio chunk size | 8000 samples (500ms) | Tránh 502 CloudFront do quá nhiều concurrent POST |
+| ENI trunking | `ECS_ENABLE_TASK_ENI=true` | Nhiều awsvpc tasks trên cùng EC2 |

@@ -1,209 +1,322 @@
-**✅ ĐÂY LÀ SPEC HOÀN CHỈNH CHO DỰ ÁN CỦA BẠN**
+# MemRAG Chatbot — Spec hiện tại
 
-Tôi đã thiết kế theo đúng những gì bạn yêu cầu:  
-- **Google ADK** làm core agent  
-- **FilesRetrieval** + **ContextFilterPlugin** cho RAG & short-term memory  
-- **mem0** cho long-term memory + cá nhân hóa  
-- **Qdrant** làm vector DB  
-- Input: **text + ảnh** (multimodal)  
-- Upload **PDF** để RAG  
-- FE: **React** (riêng folder)  
-- BE: **Docker** (docker-compose)  
+> Tài liệu này mô tả **trạng thái thực tế** của hệ thống (không phải spec thiết kế ban đầu).
+> Cập nhật lần cuối: 2026-04-07
 
-### 1. Mô tả dự án (Project Description)
+---
 
-**Tên dự án đề xuất:** **MemRAG Chatbot** (hoặc **PersonalAI Companion**)
+## 1. Mô tả dự án
 
-**Mô tả ngắn gọn:**  
-MemRAG Chatbot là một chatbot cá nhân hóa đa phương thức (multimodal) được xây dựng trên **Google Agent Development Kit (ADK)**. Người dùng có thể chat bằng **text hoặc upload ảnh**, upload file **PDF** để thực hiện RAG thông minh. Hệ thống có **short-term memory** (qua ADK Session + ContextFilterPlugin) và **long-term memory + personalization** (qua mem0 + Qdrant). Toàn bộ backend chạy trong Docker, frontend dùng React hiện đại, dễ scale và deploy.
+**MemRAG Chatbot** là chatbot cá nhân hóa đa phương thức (multimodal) xây dựng trên Google Agent Development Kit (ADK). Tính năng chính:
 
-**Mục tiêu:**  
-- Tạo trải nghiệm chatbot “nhớ lâu”, hiểu sở thích người dùng theo thời gian.  
-- Hỗ trợ RAG trên tài liệu PDF cá nhân.  
-- Hoàn toàn miễn phí (local/self-hosted) hoặc dễ nâng cấp lên Gemini API.
+- Chat text/ảnh với Gemini, streaming SSE token-by-token
+- Upload PDF để RAG (Retrieval-Augmented Generation)
+- Long-term memory & personalization qua mem0
+- Session persistence qua DynamoDB (sidebar history, resume)
+- Auto-summarization context khi hội thoại dài
+- **Realtime transcription** (Soniox STT) — voice → text → inject vào RAG
 
-### 2. Tính năng chính (Features)
+---
 
-| Nhóm tính năng              | Chi tiết cụ thể |
-|-----------------------------|-----------------|
-| **Input**                   | - Text<br>- Upload ảnh (Gemini multimodal)<br>- Upload PDF (RAG) |
-| **RAG Pipeline**            | - Upload PDF → FilesRetrieval Tool (dùng ADK Artifact)<br>- Chunking + embedding (Gemini embedding)<br>- Lưu vào Qdrant collection (per user hoặc global) |
-| **Session Persistence**     | - **DynamoDB** lưu toàn bộ lịch sử chat per user (DynamoDB Local dev / AWS prod)<br>- API: list sessions, load messages, delete session<br>- Title auto-extract từ tin nhắn đầu tiên<br>- Sidebar FE hiển thị history, click để resume |
-| **Short-term Memory**       | - ADK Session + **ContextFilterPlugin** (async callback)<br>- Truncation đơn giản khi < threshold<br>- **Auto-summarization**: khi vượt `SUMMARY_THRESHOLD` (default 30 msgs) → Gemini tóm tắt messages cũ, giữ `SUMMARY_KEEP_RECENT` (default 10) messages gần nhất; summary lưu vào session state (persist DynamoDB); FE vẫn hiển thị full history |
-| **Long-term Memory & Personalization** | - **mem0** (store user preferences, summary cuộc trò chuyện, facts cá nhân)<br>- mem0 kết nối Qdrant |
-| **Agent**                   | - Root Agent (Gemini 2.5 Flash / Pro)<br>- Tools: FilesRetrieval, PDFIngestion, QdrantSearch, Mem0Store/Retrieve |
-| **UI/UX**                   | - React + Tailwind + shadcn/ui<br>- Chat hiện đại, hỗ trợ drag & drop file/ảnh<br>- Hiển thị citation từ RAG |
-| **Khác**                    | - Multi-user (user_id trong mem0 & Qdrant)<br>- Lịch sử chat lưu persistent<br>- Error handling & logging |
+## 2. Tính năng chính
 
-### 3. Tech Stack (100% theo yêu cầu của bạn)
+| Nhóm | Chi tiết |
+|------|----------|
+| **Chat** | Text + ảnh (base64 inline). Streaming SSE token-by-token qua `POST /api/v1/chat/stream`. Non-streaming qua `POST /api/v1/chat`. |
+| **RAG** | Upload PDF → chunk (LangChain TextSplitter, 1000/200 overlap) → embed (gemini-embedding-001, 768-dim) → Qdrant. Search qua `qdrant_search_tool` ADK tool. |
+| **Long-term Memory** | mem0ai lưu facts/preferences/summary per user_id vào Qdrant collection `mem0_memories`. Tools: `store_memory`, `retrieve_memory`. |
+| **Session Persistence** | `DynamoDBSessionService` extends ADK `BaseSessionService`. PK=`{app_name}#{user_id}`, SK=`session_id`. Title auto-extract từ first message. `GET /sessions`, `GET /sessions/{id}`, `DELETE /sessions/{id}`. |
+| **Context Filter** | `ContextFilterPlugin` — async `before_model_callback`. Truncation khi `max_context_messages < len < summary_threshold`; auto-summarize (Gemini) khi `≥ summary_threshold` (default 30). Summary lưu vào ADK session state → persist DynamoDB. Frontend vẫn load full history. |
+| **Realtime Transcription** | Soniox STT WebSocket. Flow: `POST /transcription/start` → `POST /transcription/audio/{id}` (binary PCM16) → `GET /transcription/stream/{id}` (SSE) → `POST /transcription/stop/{id}`. Agent có thể search transcript qua `search_meeting_transcripts` tool. |
+| **Meeting Storage** | DynamoDB `memrag-meetings` (single-table). Metadata: `PK=USER#{user_id}, SK=MEETING#{id}`; utterances: `PK=MEETING#{id}, SK=UTTERANCE#{ts}#{seq}`. Qdrant collection `meetings` lưu transcript chunks (time-window 60s / max 300 words). `GET /meetings`, `GET /meetings/{id}/transcript`, `DELETE /meetings/{id}`. |
+| **File Storage** | S3 (production) hoặc local filesystem. Backend auto-switch qua `STORAGE_BACKEND` env var. Presigned URL 1h cho download. |
+| **Multiuser** | User identity từ `X-User-ID` request header (default `"default_user"`). Tất cả data scoped per user_id. |
 
-| Layer       | Công nghệ                                                                 |
-|-------------|---------------------------------------------------------------------------|
-| **LLM**     | Gemini 2.5 Flash (Google AI Studio - free tier) hoặc Gemini 2.5 Pro      |
-| **Agent Framework** | **Google ADK** (với ContextFilterPlugin)                                 |
-| **Memory**  | **mem0** (long-term + personalization)                                    |
-| **Vector DB** | **Qdrant** (self-hosted)                                                 |
-| **RAG Tools** | FilesRetrieval (custom tool dựa trên ADK Artifact) + Qdrant MCP Tool     |
-| **Backend** | Python + FastAPI (hoặc ADK built-in runner) + Docker                     |
-| **Frontend** | React 19 + Vite + TypeScript + Tailwind + shadcn/ui + Axios              |
-| **Session DB** | **DynamoDB** (Local: amazon/dynamodb-local; Prod: AWS DynamoDB)       |
-| **Docker**  | docker-compose (Qdrant + Backend + DynamoDB Local)                       |
-| **Storage** | Local filesystem / S3 (artifacts) + Qdrant                              |
+---
 
-### 4. Kiến trúc hệ thống (High-level Architecture)
+## 3. Tech Stack
 
-```
-Người dùng (React FE)
-       ↓ (REST / SSE streaming)
-Backend API (FastAPI + ADK Agent)
-       ├── ADK Root Agent (Gemini)
-       │     ├── ContextFilterPlugin (async) ──→ Truncation / Auto-summarization
-       │     ├── FilesRetrieval Tool → PDF Ingestion → embed → Qdrant
-       │     ├── QdrantSearch Tool (RAG retrieval)
-       │     └── mem0 Tools (store/retrieve long-term memory)
-       ├── DynamoDBSessionService ──→ Session history (list/load/delete)
-       └── mem0 + Qdrant (long-term & personalization)
-```
+| Layer | Công nghệ |
+|-------|-----------|
+| **LLM** | Gemini 2.5 Flash (google-adk ≥ 1.0.0) |
+| **Embeddings** | `gemini-embedding-001` (768-dim), `google.genai.Client` (NOT `google.generativeai`) |
+| **Agent Framework** | Google ADK — `LlmAgent` + `Runner` + `DynamoDBSessionService` |
+| **Memory** | mem0ai ≥ 0.1.55 (long-term, per user) |
+| **Vector DB** | Qdrant self-hosted — collections: `rag_documents`, `mem0_memories`, `meetings` |
+| **Session DB** | AWS DynamoDB (prod) / `amazon/dynamodb-local` port 8001 (local) |
+| **STT** | Soniox external API — WebSocket, `websockets.asyncio.client` v14+ |
+| **Backend** | FastAPI 0.115+, Uvicorn, Python ≥ 3.11, `uv` package manager |
+| **Logging** | structlog (structured JSON logs) |
+| **Storage** | S3 (`chatbotdeploytestv1`) hoặc local `./uploads` |
+| **Frontend** | React 18.3.1, Vite 5, TypeScript 5.5, TailwindCSS 3, React Query v5, Zustand 5, Axios 1.7 |
+| **Audio** | AudioWorklet (inline blob) → 16kHz PCM16 mono → `POST /api/v1/transcription/audio/{id}` |
+| **Infra** | EC2 t3.small, ECS (sidecar: backend + qdrant), ECR, S3, CloudFront, DynamoDB, SSM, CloudWatch |
+| **CI/CD** | GitHub Actions — 2 workflows độc lập (backend: lint→test→ECR→ECS; frontend: build→S3→CF) |
 
-**Flow chính:**
-1. User upload PDF → PDF Ingestion Tool → chunk → embed → Qdrant.
-2. Chat (text/ảnh) → ADK Agent → ContextFilterPlugin (truncate hoặc auto-summarize) → retrieve từ Qdrant + mem0 → generate (streaming SSE).
-3. Mỗi turn → ADK `append_event` → `DynamoDBSessionService` persist session + title vào DynamoDB.
-4. Frontend load lại trang → `GET /sessions` → hiển thị history sidebar; click session → `GET /sessions/{id}` → resume.
+---
 
-### 3. Cấu trúc thư mục toàn dự án (Monorepo)
+## 4. Kiến trúc hệ thống
 
 ```
-memrag-chatbot/
-├── frontend/                      # React frontend
-│   ├── src/
-│   ├── public/
-│   ├── package.json
-│   └── vite.config.ts
-│
-├── backend/                       # Backend (FastAPI + ADK)
+Người dùng (React SPA tại CloudFront)
+       │ HTTPS (same-origin, không cần CORS)
+       ▼
+CloudFront ──/api/*──► EC2:8000 (FastAPI + Uvicorn)
+           ──/*──────► S3 (React build)
+                              │
+                    ┌─────────┴────────────────────────────┐
+                    │         FastAPI App                    │
+                    │                                        │
+                    │  ┌────────────────────────────────┐   │
+                    │  │  Google ADK Runner (singleton)  │   │
+                    │  │  ├── LlmAgent (Gemini 2.5 Flash)│   │
+                    │  │  │   ├── ContextFilterPlugin    │   │
+                    │  │  │   ├── qdrant_search_tool     │   │
+                    │  │  │   ├── pdf_ingestion_tool      │   │
+                    │  │  │   ├── mem0_tools              │   │
+                    │  │  │   └── search_meeting_transcripts│  │
+                    │  │  └── DynamoDBSessionService      │   │
+                    │  └────────────────────────────────┘   │
+                    │                                        │
+                    │  Services: RAGService, MemoryService,  │
+                    │  DocumentService, SonioxService,       │
+                    │  TranscriptRAGService                  │
+                    │                                        │
+                    │  Repositories: QdrantRepository,       │
+                    │  Mem0Repository, MeetingRepository     │
+                    └────────────┬──────────────────────────┘
+                                 │
+              ┌──────────────────┼──────────────────────┐
+              │                  │                        │
+              ▼                  ▼                        ▼
+         Qdrant :6333       DynamoDB               Soniox API
+    (rag_documents,      (memrag_sessions,      (external WebSocket
+     mem0_memories,       memrag-meetings)        STT realtime)
+     meetings)
+```
+
+**Luồng chat:**
+1. `POST /chat/stream` → `ChatService.chat_stream()` → `runner.run_async(RunConfig(SSE))` → `ContextFilterPlugin` (truncate/summarize) → LLM → stream `event.partial` → SSE chunks.
+2. Mỗi turn ADK `append_event` → `DynamoDBSessionService` persist (title auto-extract từ first message).
+
+**Luồng transcription:**
+1. `POST /transcription/start` → `SonioxService.start_session()` → mở WS Soniox + background receiver task.
+2. Frontend AudioWorklet (16kHz PCM16) → `POST /transcription/audio/{id}` mỗi 500ms (max 2 concurrent).
+3. `GET /transcription/stream/{id}` SSE → nhận `partial`/`final` events.
+4. `POST /transcription/stop/{id}` → lưu utterances DynamoDB + embed → Qdrant `meetings`.
+
+---
+
+## 5. API Endpoints
+
+### Chat
+| Method | Path | Mô tả |
+|--------|------|-------|
+| POST | `/api/v1/chat` | Chat đồng bộ (text + ảnh optional) |
+| POST | `/api/v1/chat/stream` | Chat streaming SSE |
+
+### Documents (RAG)
+| Method | Path | Mô tả |
+|--------|------|-------|
+| POST | `/api/v1/documents/upload` | Upload PDF (max theo `MAX_UPLOAD_SIZE_MB`) |
+| GET | `/api/v1/documents` | List tài liệu của user |
+| DELETE | `/api/v1/documents/{id}` | Xóa tài liệu + Qdrant chunks |
+
+### Memory
+| Method | Path | Mô tả |
+|--------|------|-------|
+| POST | `/api/v1/memory/search` | Tìm kiếm long-term memory |
+| GET | `/api/v1/memory/user/{user_id}` | Lấy tất cả memories của user |
+| DELETE | `/api/v1/memory/{id}` | Xóa một memory |
+
+### Sessions
+| Method | Path | Mô tả |
+|--------|------|-------|
+| GET | `/api/v1/sessions` | List sessions của user (từ DynamoDB) |
+| GET | `/api/v1/sessions/{id}` | Load toàn bộ messages của session |
+| DELETE | `/api/v1/sessions/{id}` | Xóa session |
+
+### Transcription
+| Method | Path | Mô tả |
+|--------|------|-------|
+| POST | `/api/v1/transcription/start` | Bắt đầu Soniox session, trả `meeting_id` |
+| POST | `/api/v1/transcription/audio/{id}` | Gửi binary PCM16 chunk (204 No Content) |
+| GET | `/api/v1/transcription/stream/{id}` | SSE stream `partial`/`final`/`end`/`error` |
+| POST | `/api/v1/transcription/stop/{id}` | Dừng, lưu DynamoDB + ingest Qdrant |
+
+### Meetings
+| Method | Path | Mô tả |
+|--------|------|-------|
+| GET | `/api/v1/meetings` | List meetings của user |
+| GET | `/api/v1/meetings/{id}/transcript` | Full transcript của meeting |
+| DELETE | `/api/v1/meetings/{id}` | Xóa meeting (DynamoDB + Qdrant) |
+
+---
+
+## 6. Cấu trúc thư mục
+
+```
+proj2/
+├── backend/
 │   ├── app/
-│   │   ├── __init__.py
-│   │   ├── main.py                # Entry point FastAPI app
-│   │   ├── core/
-│   │   │   ├── __init__.py
-│   │   │   ├── config.py          # Settings (Pydantic)
-│   │   │   ├── security.py
-│   │   │   └── database.py        # Qdrant client, mem0 client
-│   │   ├── schemas/               # Pydantic models (request/response)
-│   │   │   ├── __init__.py
+│   │   ├── agents/
+│   │   │   ├── root_agent.py           # LlmAgent definition
+│   │   │   ├── plugins/
+│   │   │   │   └── context_filter_plugin.py  # async before_model_callback
+│   │   │   └── tools/
+│   │   │       ├── qdrant_search_tool.py
+│   │   │       ├── pdf_ingestion_tool.py
+│   │   │       ├── files_retrieval_tool.py
+│   │   │       ├── mem0_tools.py
+│   │   │       └── search_meeting_transcripts.py  # search Soniox transcripts
+│   │   ├── api/v1/
 │   │   │   ├── chat.py
-│   │   │   ├── document.py
+│   │   │   ├── documents.py
 │   │   │   ├── memory.py
-│   │   │   └── user.py
-│   │   ├── services/              # Business logic
-│   │   │   ├── __init__.py
+│   │   │   ├── sessions.py
+│   │   │   └── transcription.py        # transcription + meetings routers
+│   │   ├── core/
+│   │   │   ├── config.py               # Pydantic Settings (env vars)
+│   │   │   ├── database.py             # lru_cache clients (Qdrant, mem0, DynamoDB)
+│   │   │   ├── dependencies.py         # FastAPI DI graph + get_runner() singleton
+│   │   │   └── logging.py              # structlog setup
+│   │   ├── repositories/
+│   │   │   ├── qdrant_repo.py
+│   │   │   ├── mem0_repo.py
+│   │   │   └── meeting_repo.py         # DynamoDB meetings CRUD
+│   │   ├── services/
 │   │   │   ├── chat_service.py
 │   │   │   ├── rag_service.py
 │   │   │   ├── memory_service.py
-│   │   │   └── document_service.py
-│   │   ├── repositories/          # Data access layer (Qdrant, mem0)
-│   │   │   ├── __init__.py
-│   │   │   ├── qdrant_repo.py
-│   │   │   └── mem0_repo.py
-│   │   ├── agents/                # Google ADK Agents & Tools
-│   │   │   ├── __init__.py
-│   │   │   ├── root_agent.py
-│   │   │   ├── tools/
-│   │   │   │   ├── files_retrieval_tool.py
-│   │   │   │   ├── pdf_ingestion_tool.py
-│   │   │   │   ├── qdrant_search_tool.py
-│   │   │   │   └── mem0_tools.py
-│   │   │   └── plugins/
-│   │   │       └── context_filter_plugin.py
-│   │   ├── api/                   # Routers (endpoints)
-│   │   │   ├── __init__.py
-│   │   │   ├── v1/
-│   │   │   │   ├── __init__.py
-│   │   │   │   ├── chat.py        # /chat endpoints
-│   │   │   │   ├── documents.py   # /documents upload & list
-│   │   │   │   └── memory.py      # memory management (optional)
-│   │   ├── dependencies.py        # FastAPI dependencies (user_id, db, etc.)
+│   │   │   ├── document_service.py
+│   │   │   ├── dynamo_session_service.py  # ADK BaseSessionService impl
+│   │   │   ├── soniox_service.py          # WebSocket manager (_sessions dict)
+│   │   │   └── transcript_rag_service.py  # embed + ingest transcript → Qdrant
+│   │   ├── schemas/
+│   │   │   ├── chat.py
+│   │   │   ├── document.py
+│   │   │   ├── memory.py
+│   │   │   └── transcription.py
+│   │   ├── exceptions/
+│   │   │   └── handlers.py             # ValueError→400, FileNotFoundError→404, Exception→500
 │   │   ├── utils/
-│   │   │   ├── file_utils.py
-│   │   │   └── gemini_utils.py
-│   │   └── exceptions/
-│   │       └── handlers.py
-│   ├── Dockerfile
-│   ├── requirements.txt
-│   └── .env.example
+│   │   │   └── gemini_utils.py         # batch embed, google.genai.Client
+│   │   ├── storage/
+│   │   │   └── __init__.py             # StorageBackend: local | s3
+│   │   └── main.py                     # FastAPI app + lifespan
+│   ├── tests/
+│   ├── pyproject.toml                  # uv, ruff, pytest config
+│   ├── uv.lock
+│   └── Dockerfile
 │
-├── docker-compose.yml
-├── .env
-├── README.md
-└── docs/
-    └── architecture.md
+├── frontend/
+│   ├── src/
+│   │   ├── api/
+│   │   │   ├── client.ts               # axios instance (relative URLs)
+│   │   │   ├── chat.ts
+│   │   │   ├── documents.ts
+│   │   │   ├── memory.ts
+│   │   │   ├── sessions.ts
+│   │   │   └── transcription.ts
+│   │   ├── components/
+│   │   │   ├── chat/                   # ChatPanel, MessageList, InputBar
+│   │   │   ├── documents/              # DocumentPanel
+│   │   │   ├── memory/                 # MemoryPanel
+│   │   │   └── transcription/          # TranscriptionPanel (Mic icon toggle)
+│   │   ├── hooks/
+│   │   │   └── useTranscription.ts     # audio capture + Soniox flow
+│   │   ├── services/
+│   │   │   └── AudioCaptureService.ts  # AudioWorklet 16kHz PCM16 (mic/system/both)
+│   │   ├── store/                      # Zustand state
+│   │   └── types/
+│   ├── package.json
+│   ├── vite.config.ts                  # proxy /api → :8000
+│   ├── tailwind.config.js
+│   └── eslint.config.js
+│
+├── docker-compose.yml                  # qdrant + dynamodb-local + backend
+├── .env                                # secrets (gitignore này!)
+├── .github/workflows/
+│   ├── ci-cd.yml                       # backend: lint → test → ECR → ECS
+│   └── deploy-frontend.yml             # frontend: build → S3 → CloudFront
+├── .claude/
+│   ├── settings.json                   # format-on-edit hooks
+│   └── skills/                         # lint-fix, verify, verify-fe, docker-reset, check-all, deploy-frontend
+├── infrastructure/                     # Terraform (EC2, ECS, ECR, S3, CloudFront, IAM)
+├── docs/
+│   ├── spec.md                         # (file này)
+│   ├── deploy_plan.md
+│   ├── cicd-flow.md
+│   └── soniox-plan.md
+├── CLAUDE.md
+└── CLAUDE.local.md
 ```
 
-### 4. Kiến trúc Backend (Layered Architecture)
+---
 
-- **Schemas**: Định nghĩa tất cả request/response models (Pydantic).
-- **Repositories**: Truy cập dữ liệu thô (Qdrant, mem0).
-- **Services**: Chứa business logic, phối hợp giữa ADK Agent, RAG, memory.
-- **Agents**: Chứa root_agent và các custom tools/plugins của Google ADK.
-- **API (Routers)**: Chỉ định nghĩa endpoints, gọi service, không chứa logic.
-- **Core**: Config, database connection, exceptions.
+## 7. Environment Variables quan trọng
 
-**Luồng dữ liệu điển hình**:
-User request → Router → Dependency → Service → (Repository / ADK Agent) → Response
+| Biến | Bắt buộc | Mô tả |
+|------|----------|-------|
+| `GEMINI_API_KEY` | ✅ | Google AI Studio API key |
+| `GEMINI_MODEL` | - | Default: `gemini-2.5-flash` |
+| `GEMINI_EMBEDDING_MODEL` | - | Default: `models/gemini-embedding-001` |
+| `QDRANT_URL` | - | Default: `http://localhost:6333`; docker-compose override: `http://qdrant:6333` |
+| `DYNAMODB_ENDPOINT_URL` | - | Để trống = real AWS; local: `http://localhost:8001` |
+| `DYNAMODB_TABLE_NAME` | - | Default: `memrag_sessions` |
+| `DYNAMODB_REGION` | - | Default: `ap-southeast-2` |
+| `STORAGE_BACKEND` | - | `local` hoặc `s3` (default: `local`) |
+| `S3_BUCKET` | nếu s3 | `chatbotdeploytestv1` |
+| `S3_REGION` | nếu s3 | `ap-southeast-2` |
+| `ALLOWED_ORIGINS` | - | JSON array: `["http://localhost:5173"]` (không phải comma-separated) |
+| `SONIOX_API_KEY` | nếu dùng transcription | Soniox account API key |
+| `SONIOX_MODEL` | - | Default: `stt-rt-preview` |
+| `SONIOX_TARGET_LANG` | - | Default: `vi` (tiếng Việt) |
+| `MAX_CONTEXT_MESSAGES` | - | Default: 20 |
+| `SUMMARY_THRESHOLD` | - | Default: 30 (số messages trước khi auto-summarize) |
+| `SUMMARY_KEEP_RECENT` | - | Default: 10 (số messages giữ lại sau summarize) |
 
-### 5. Các Endpoints chính (API v1)
+---
 
-Dưới đây là các endpoint quan trọng (định nghĩa trong `app/api/v1/`):
-
-| Method | Endpoint                        | Mô tả |
-|--------|----------------------------------|-------|
-| POST   | `/api/v1/chat`                  | Chat với text hoặc ảnh (multimodal) |
-| GET    | `/api/v1/chat/stream`           | Chat streaming (SSE) |
-| POST   | `/api/v1/documents/upload`      | Upload PDF → ingest vào RAG |
-| GET    | `/api/v1/documents`             | List tài liệu đã upload |
-| DELETE | `/api/v1/documents/{id}`        | Xóa tài liệu |
-| POST   | `/api/v1/memory/search`         | Tìm kiếm long-term memory (debug) |
-| GET    | `/api/v1/memory/user/{user_id}` | Lấy thông tin personalization |
-| DELETE | `/api/v1/memory/{memory_id}`    | Xóa memory |
-| GET    | `/api/v1/sessions`              | List các session chat của user (từ DynamoDB) |
-| GET    | `/api/v1/sessions/{session_id}` | Lấy toàn bộ messages của session |
-| DELETE | `/api/v1/sessions/{session_id}` | Xóa session |
-
-### 6. docker-compose.yml (gợi ý)
+## 8. docker-compose.yml (local dev)
 
 ```yaml
 services:
   qdrant:
     image: qdrant/qdrant:latest
-    container_name: memrag-qdrant
     ports:
       - "6333:6333"
+      - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
-    restart: unless-stopped
+
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    ports:
+      - "8001:8000"
+    command: -jar DynamoDBLocal.jar -inMemory -sharedDb
 
   backend:
     build: ./backend
-    container_name: memrag-backend
     ports:
       - "8000:8000"
     depends_on:
       - qdrant
+      - dynamodb-local
+    env_file: .env
     environment:
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - QDRANT_URL=http://qdrant:6333
-      - MEM0_CONFIG_PATH=/app/mem0_config.json
+      QDRANT_URL: http://qdrant:6333
+      DYNAMODB_ENDPOINT_URL: http://dynamodb-local:8000
     volumes:
-      - ./backend:/app
-    restart: unless-stopped
+      - uploads_data:/app/uploads
 
 volumes:
   qdrant_data:
+  uploads_data:
 ```
 
-**Chạy local:**
+**Local dev:**
 ```bash
-docker-compose up -d
-cd frontend && npm run dev
+docker compose up -d       # qdrant + dynamodb-local + backend
+cd frontend && npm run dev  # :5173, proxy /api → :8000
 ```
