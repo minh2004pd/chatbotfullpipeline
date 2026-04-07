@@ -124,19 +124,24 @@ export function useTranscription({ userId }: UseTranscriptionOptions) {
         }
 
         // 4. Bắt đầu stream audio (worklet đã pre-loaded, không có độ trễ async)
-        capture.startStreaming(async (chunk) => {
-          try {
-            await fetch(`/api/v1/transcription/audio/${meeting_id}`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/octet-stream',
-                'X-User-ID': userId,
-              },
-              body: chunk,
+        // Giới hạn max 2 request concurrent để tránh CloudFront 502 khi gửi binary POST tần suất cao
+        let inFlight = 0
+        const MAX_IN_FLIGHT = 2
+        capture.startStreaming((chunk) => {
+          if (inFlight >= MAX_IN_FLIGHT) return
+          inFlight++
+          fetch(`/api/v1/transcription/audio/${meeting_id}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/octet-stream',
+              'X-User-ID': userId,
+            },
+            body: chunk,
+          })
+            .catch(() => {})
+            .finally(() => {
+              inFlight--
             })
-          } catch {
-            // non-fatal, tiếp tục
-          }
         })
 
         setIsRecording(true)

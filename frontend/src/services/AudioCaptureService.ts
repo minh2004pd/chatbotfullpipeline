@@ -15,7 +15,7 @@ class PCM16Processor extends AudioWorkletProcessor {
   constructor() {
     super();
     this._buffer = [];
-    this._bufferSize = 4096;
+    this._bufferSize = 8000;
   }
 
   process(inputs) {
