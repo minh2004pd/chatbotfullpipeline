@@ -1,12 +1,14 @@
 import { useState } from 'react'
-import { Menu, X } from 'lucide-react'
+import { Menu, X, Mic } from 'lucide-react'
 import Sidebar from './Sidebar'
 import ChatWindow from '@/components/chat/ChatWindow'
 import ToastContainer from '@/components/ui/ToastContainer'
+import TranscriptionPanel from '@/components/transcription/TranscriptionPanel'
 import { useChatStore } from '@/store/chatStore'
 
 export default function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [transcriptionOpen, setTranscriptionOpen] = useState(false)
   const toasts = useChatStore((s) => s.toasts)
   const removeToast = useChatStore((s) => s.removeToast)
 
@@ -73,6 +75,17 @@ export default function AppLayout() {
             <span className="text-sm font-medium text-[#a0a0a0]">MemRAG Chat</span>
           </div>
           <div className="flex-1" />
+          <button
+            onClick={() => setTranscriptionOpen((v) => !v)}
+            className={`p-1.5 rounded-md transition-colors ${
+              transcriptionOpen
+                ? 'text-violet-400 bg-violet-900/30'
+                : 'text-[#666] hover:text-[#f1f1f1] hover:bg-[#2a2a2a]'
+            }`}
+            title="Toggle transcription panel"
+          >
+            <Mic size={18} />
+          </button>
           <div className="text-xs text-[#666] hidden sm:block">
             Multimodal · RAG · Long-term Memory
           </div>
@@ -83,6 +96,13 @@ export default function AppLayout() {
           <ChatWindow />
         </div>
       </main>
+
+      {/* Transcription panel (right side) */}
+      {transcriptionOpen && (
+        <aside className="w-80 flex-shrink-0 border-l border-[#2e2e2e] flex flex-col h-full bg-[#0f0f0f]">
+          <TranscriptionPanel />
+        </aside>
+      )}
 
       {/* Toast notifications */}
       <ToastContainer toasts={toasts} onRemove={removeToast} />

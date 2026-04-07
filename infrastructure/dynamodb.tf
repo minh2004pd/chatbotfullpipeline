@@ -18,3 +18,26 @@ resource "aws_dynamodb_table" "sessions" {
 
   tags = { Project = var.project_name }
 }
+
+# ── DynamoDB table cho meetings + utterances (voice transcription) ──────
+resource "aws_dynamodb_table" "meetings" {
+  # App config default: "memrag-meetings" => với project_name default "memrag"
+  name         = "${var.project_name}-meetings"
+  billing_mode = "PAY_PER_REQUEST"
+
+  # Single-table design (see app/repositories/meeting_repo.py)
+  hash_key  = "PK"
+  range_key = "SK"
+
+  attribute {
+    name = "PK"
+    type = "S"
+  }
+
+  attribute {
+    name = "SK"
+    type = "S"
+  }
+
+  tags = { Project = var.project_name }
+}

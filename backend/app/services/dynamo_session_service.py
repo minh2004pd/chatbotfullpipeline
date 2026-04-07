@@ -78,9 +78,36 @@ class DynamoDBSessionService(BaseSessionService):
             return None
         return text[:120]
 
+    @staticmethod
+    def _strip_inline_images(raw_events: list[dict]) -> list[dict]:
+        """Xóa inline image data trước khi lưu vào DynamoDB để tránh vượt giới hạn 400KB.
+        Image part được thay bằng text placeholder '[Image: mime_type]'.
+        """
+        import copy
+
+        result = []
+        for event in raw_events:
+            content = event.get("content") or {}
+            parts = content.get("parts") or []
+            if not any(p.get("inline_data") for p in parts):
+                result.append(event)
+                continue
+            new_parts = []
+            for part in parts:
+                if part.get("inline_data"):
+                    mime = (part["inline_data"] or {}).get("mime_type", "image")
+                    new_parts.append({"text": f"[Image: {mime}]"})
+                else:
+                    new_parts.append(part)
+            new_event = copy.deepcopy(event)
+            new_event["content"]["parts"] = new_parts
+            result.append(new_event)
+        return result
+
     def _serialize_events(self, events: list[Event]) -> str:
         """Serialize list[Event] → JSON string (dùng model_dump để tránh circular ref)."""
         raw = [e.model_dump(mode="json") for e in events]
+        raw = self._strip_inline_images(raw)
         return json.dumps(raw)
 
     def _deserialize_events(self, events_json: str) -> list[Event]:

@@ -7,8 +7,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1 import chat, documents, memory, sessions
+from app.api.v1.transcription import meetings_router
+from app.api.v1.transcription import router as transcription_router
 from app.core.config import get_settings
-from app.core.database import ensure_collections, ensure_dynamo_table
+from app.core.database import ensure_collections, ensure_dynamo_table, ensure_meetings_table
 from app.core.logger import setup_logging
 from app.exceptions.handlers import register_exception_handlers
 
@@ -34,6 +36,11 @@ async def lifespan(app: FastAPI):
         await ensure_dynamo_table()
     except Exception as e:
         logger.warning("dynamo_init_failed", error=str(e))
+
+    try:
+        await ensure_meetings_table()
+    except Exception as e:
+        logger.warning("dynamo_meetings_init_failed", error=str(e))
 
     yield
 
@@ -63,6 +70,8 @@ def create_app() -> FastAPI:
     app.include_router(documents.router, prefix="/api/v1")
     app.include_router(memory.router, prefix="/api/v1")
     app.include_router(sessions.router, prefix="/api/v1")
+    app.include_router(transcription_router, prefix="/api/v1")
+    app.include_router(meetings_router, prefix="/api/v1")
 
     # Exception handlers
     register_exception_handlers(app)

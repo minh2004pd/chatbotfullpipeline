@@ -86,6 +86,7 @@ async def ensure_collections() -> None:
     for collection_name in [
         settings.qdrant_collection_rag,
         settings.qdrant_collection_mem0,
+        settings.qdrant_collection_meetings,
     ]:
         recreate = False
         if collection_name in existing_collections:
@@ -161,3 +162,32 @@ async def ensure_dynamo_table() -> None:
         # Chờ table sẵn sàng (chỉ cần thiết với DynamoDB Local sync)
         resource.Table(table_name).wait_until_exists()
         logger.info("dynamo_table_created", table=table_name)
+
+
+async def ensure_meetings_table() -> None:
+    """Tạo DynamoDB table memrag-meetings nếu chưa tồn tại."""
+    settings = get_settings()
+    resource = get_dynamodb_resource()
+    table_name = settings.meetings_table_name
+
+    try:
+        table = resource.Table(table_name)
+        table.load()
+        logger.info("dynamo_meetings_table_ready", table=table_name)
+    except ClientError as e:
+        if e.response["Error"]["Code"] != "ResourceNotFoundException":
+            raise
+        resource.create_table(
+            TableName=table_name,
+            KeySchema=[
+                {"AttributeName": "PK", "KeyType": "HASH"},
+                {"AttributeName": "SK", "KeyType": "RANGE"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "PK", "AttributeType": "S"},
+                {"AttributeName": "SK", "AttributeType": "S"},
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        resource.Table(table_name).wait_until_exists()
+        logger.info("dynamo_meetings_table_created", table=table_name)

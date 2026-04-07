@@ -12,6 +12,7 @@ from app.agents.plugins.context_filter_plugin import (
     context_filter_before_model,
 )
 from app.agents.tools.files_retrieval_tool import list_user_documents
+from app.agents.tools.meeting_search_tool import search_meeting_transcripts
 from app.agents.tools.mem0_tools import retrieve_memories, store_memory
 from app.agents.tools.qdrant_search_tool import search_documents
 from app.core.llm_config import get_llm_config
@@ -30,6 +31,7 @@ def get_root_agent() -> LlmAgent:
             retrieve_memories,
             store_memory,
             list_user_documents,
+            search_meeting_transcripts,
         ],
         generate_content_config=genai_types.GenerateContentConfig(
             temperature=config.llm.temperature,

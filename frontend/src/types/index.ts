@@ -103,6 +103,62 @@ export interface SessionMessages {
   messages: SessionMessage[]
 }
 
+// ─── Transcription / Meeting types ───────────────────────────────────────────────
+
+export type AudioSource = 'mic' | 'system' | 'both'
+
+export interface TranscriptionToken {
+  text: string
+  speaker?: number
+  start_ms?: number
+  end_ms?: number
+}
+
+export interface TranscriptionEvent {
+  type: 'partial' | 'final' | 'error' | 'end' | 'keepalive'
+  meeting_id: string
+  tokens: TranscriptionToken[]
+  translation?: string
+}
+
+export interface MeetingInfo {
+  meeting_id: string
+  title: string
+  user_id: string
+  status: 'recording' | 'completed'
+  duration_ms?: number
+  speakers: string[]
+  languages: string[]
+  utterance_count: number
+  created_at: string
+  updated_at?: string
+}
+
+export interface UtteranceItem {
+  speaker: string
+  language?: string
+  text: string
+  translated_text?: string
+  confidence?: number
+  start_ms?: number
+  end_ms?: number
+  created_at?: string
+}
+
+export interface MeetingTranscript {
+  meeting_id: string
+  title: string
+  utterances: UtteranceItem[]
+  total: number
+}
+
+export interface LiveUtterance {
+  speaker: string
+  text: string
+  translation?: string
+  isFinal: boolean
+}
+
 // ─── UI / Store types ────────────────────────────────────────────────────────────
 
 export interface Toast {

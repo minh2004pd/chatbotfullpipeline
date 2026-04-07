@@ -85,6 +85,7 @@ export const useChatStore = create<ChatStore>()(
         userId: state.userId,
         sessionId: state.sessionId,
       }),
+      migrate: (persistedState) => persistedState,
     },
   ),
 )

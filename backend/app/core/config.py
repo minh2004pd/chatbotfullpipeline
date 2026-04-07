@@ -55,6 +55,16 @@ class Settings(BaseSettings):
     aws_access_key_id: str = ""
     aws_secret_access_key: str = ""
 
+    # Soniox (realtime transcription)
+    soniox_api_key: str = ""
+    soniox_model: str = "stt-rt-v4"
+    soniox_target_lang: str = "vi"
+    soniox_ws_url: str = "wss://stt-rt.soniox.com/transcribe-websocket"
+
+    # Meetings (DynamoDB table + Qdrant collection)
+    meetings_table_name: str = "memrag-meetings"
+    qdrant_collection_meetings: str = "meetings"
+
     # Context filter & summarization
     max_context_messages: int = 20  # simple truncation fallback
     summary_threshold: int = 30  # trigger tóm tắt khi vượt quá số messages này

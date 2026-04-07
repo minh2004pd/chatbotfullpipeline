@@ -185,7 +185,10 @@ resource "aws_iam_role_policy" "ecs_task_dynamodb" {
         "dynamodb:DescribeTable",
         "dynamodb:CreateTable",
       ]
-      Resource = [aws_dynamodb_table.sessions.arn]
+      Resource = [
+        aws_dynamodb_table.sessions.arn,
+        aws_dynamodb_table.meetings.arn,
+      ]
     }]
   })
 }

@@ -201,6 +201,7 @@ cd infrastructure
 # Tạo terraform.tfvars
 cat > terraform.tfvars <<EOF
 gemini_api_key = "your-key"
+soniox_api_key = "your-soniox-api-key"
 s3_bucket      = "your-uploads-bucket"
 s3_access_key_id     = "..."
 s3_secret_access_key = "..."

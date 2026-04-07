@@ -92,12 +92,19 @@ resource "aws_ecs_task_definition" "backend" {
         # DynamoDB — không set DYNAMODB_ENDPOINT_URL → dùng real AWS; IAM task role xử lý auth
         { name = "DYNAMODB_TABLE_NAME", value = aws_dynamodb_table.sessions.name },
         { name = "DYNAMODB_REGION", value = var.aws_region },
+        # Meetings table for voice/transcription RAG
+        { name = "MEETINGS_TABLE_NAME", value = aws_dynamodb_table.meetings.name },
+        # Soniox realtime transcription (non-secret config)
+        { name = "SONIOX_MODEL", value = var.soniox_model },
+        { name = "SONIOX_TARGET_LANG", value = var.soniox_target_lang },
+        { name = "SONIOX_WS_URL", value = var.soniox_ws_url },
       ]
 
       secrets = [
         { name = "GEMINI_API_KEY", valueFrom = aws_ssm_parameter.gemini_api_key.arn },
         { name = "S3_ACCESS_KEY_ID", valueFrom = aws_ssm_parameter.s3_access_key_id.arn },
         { name = "S3_SECRET_ACCESS_KEY", valueFrom = aws_ssm_parameter.s3_secret_access_key.arn },
+        { name = "SONIOX_API_KEY", valueFrom = aws_ssm_parameter.soniox_api_key.arn },
       ]
 
       logConfiguration = {
@@ -165,6 +172,14 @@ resource "aws_ssm_parameter" "s3_secret_access_key" {
   tags  = { Project = var.project_name }
 }
 
+# Soniox API key (SecureString)
+resource "aws_ssm_parameter" "soniox_api_key" {
+  name  = "/${var.project_name}/SONIOX_API_KEY"
+  type  = "SecureString"
+  value = var.soniox_api_key
+  tags  = { Project = var.project_name }
+}
+
 # ── IAM: cho phép task execution role đọc SSM ────────────────────────────────
 resource "aws_iam_role_policy" "ecs_task_ssm" {
   name = "${var.project_name}-ecs-task-ssm"
@@ -179,6 +194,7 @@ resource "aws_iam_role_policy" "ecs_task_ssm" {
         aws_ssm_parameter.gemini_api_key.arn,
         aws_ssm_parameter.s3_access_key_id.arn,
         aws_ssm_parameter.s3_secret_access_key.arn,
+        aws_ssm_parameter.soniox_api_key.arn,
       ]
     }]
   })

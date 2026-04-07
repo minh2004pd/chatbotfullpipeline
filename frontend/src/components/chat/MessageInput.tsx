@@ -3,6 +3,7 @@ import {
   useState,
   useCallback,
   type ChangeEvent,
+  type ClipboardEvent,
   type KeyboardEvent,
 } from 'react'
 import { Send, Square, ImagePlus, X, Loader2 } from 'lucide-react'
@@ -111,6 +112,20 @@ export default function MessageInput({ onSend, onStop, isStreaming }: Props) {
     textareaRef.current?.focus()
   }, [text, isStreaming, imageFile, imagePreview, onSend])
 
+  const handlePaste = useCallback((e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const imageItem = Array.from(e.clipboardData.items).find((item) =>
+      ACCEPTED_MIME_TYPES.includes(item.type),
+    )
+    if (!imageItem) return
+    const file = imageItem.getAsFile()
+    if (!file) return
+    e.preventDefault()
+    setImageFile(file)
+    const reader = new FileReader()
+    reader.onload = (ev) => setImagePreview(ev.target?.result as string)
+    reader.readAsDataURL(file)
+  }, [])
+
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -169,6 +184,7 @@ export default function MessageInput({ onSend, onStop, isStreaming }: Props) {
           value={text}
           onChange={handleTextChange}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder={isStreaming ? 'Waiting for response...' : 'Message MemRAG… (Enter to send, Shift+Enter for newline)'}
           disabled={isStreaming}
           rows={1}

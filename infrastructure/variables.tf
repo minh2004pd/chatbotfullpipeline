@@ -148,3 +148,28 @@ variable "s3_presigned_url_expiry" {
   type    = number
   default = 3600
 }
+
+# ── Soniox (realtime transcription) ────────────────────────────────────────
+variable "soniox_api_key" {
+  description = "Soniox API key for realtime transcription"
+  type        = string
+  sensitive   = true
+}
+
+variable "soniox_model" {
+  description = "Soniox realtime transcription model"
+  type        = string
+  default     = "stt-rt-v4"
+}
+
+variable "soniox_target_lang" {
+  description = "Target language for Soniox translation"
+  type        = string
+  default     = "vi"
+}
+
+variable "soniox_ws_url" {
+  description = "Soniox websocket URL"
+  type        = string
+  default     = "wss://stt-rt.soniox.com/transcribe-websocket"
+}
