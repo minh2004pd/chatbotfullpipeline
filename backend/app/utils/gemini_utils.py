@@ -1,5 +1,7 @@
-"""Utilities cho Google Gemini API (embedding, v.v.)."""
+"""Utilities cho Google Gemini API (embedding, query expansion, v.v.)."""
 
+import asyncio
+import random
 from functools import lru_cache
 
 import structlog
@@ -11,9 +13,39 @@ from app.core.llm_config import get_llm_config
 
 logger = structlog.get_logger(__name__)
 
-# Cache kích thước 256 cho query embeddings — cùng một query không embed lại
-# Nhất là trong summarization, cùng một session có thể gọi search_documents nhiều lần
+# Cache kích thước 256 cho query embeddings — cùng query không embed lại
 _QUERY_EMBEDDING_CACHE_SIZE = 256
+
+# Retry config cho 429 RESOURCE_EXHAUSTED
+_RETRY_MAX_ATTEMPTS = 3
+_RETRY_BASE_DELAY = 1.0  # seconds
+_RETRY_MAX_DELAY = 10.0  # seconds cap
+
+
+async def _with_retry(coro_fn, *args, **kwargs):
+    """
+    Chạy async function với exponential backoff khi gặp 429.
+    Jitter ngẫu nhiên tránh thundering herd khi nhiều requests cùng retry.
+    """
+    last_exc = None
+    for attempt in range(_RETRY_MAX_ATTEMPTS):
+        try:
+            return await coro_fn(*args, **kwargs)
+        except Exception as exc:
+            err_str = str(exc)
+            if "429" not in err_str and "RESOURCE_EXHAUSTED" not in err_str:
+                raise  # Lỗi khác → không retry
+            last_exc = exc
+            delay = min(_RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 1), _RETRY_MAX_DELAY)
+            logger.warning(
+                "gemini_rate_limit_retry",
+                attempt=attempt + 1,
+                max_attempts=_RETRY_MAX_ATTEMPTS,
+                delay_s=round(delay, 2),
+            )
+            await asyncio.sleep(delay)
+
+    raise last_exc
 
 
 @lru_cache
@@ -23,7 +55,7 @@ def get_genai_client() -> genai.Client:
 
 
 def get_embedding(text: str) -> list[float]:
-    """Embed một đoạn text bằng Gemini embedding model."""
+    """Embed một đoạn text bằng Gemini embedding model (RETRIEVAL_DOCUMENT)."""
     config = get_llm_config()
     client = get_genai_client()
 
@@ -41,9 +73,8 @@ def get_embedding(text: str) -> list[float]:
 @lru_cache(maxsize=_QUERY_EMBEDDING_CACHE_SIZE)
 def get_query_embedding(text: str) -> tuple[float, ...]:
     """
-    Embed một câu query (task_type=RETRIEVAL_QUERY).
-    Kết quả được cache — cùng query không embed lại.
-    Returns tuple (hashable) thay vì list.
+    Embed một câu query (RETRIEVAL_QUERY). Cache LRU 256 entries.
+    Returns tuple (hashable) để tương thích với lru_cache.
     """
     config = get_llm_config()
     client = get_genai_client()
@@ -56,17 +87,19 @@ def get_query_embedding(text: str) -> tuple[float, ...]:
             output_dimensionality=config.embedding.dimension,
         ),
     )
-    # Trả về tuple (hashable) để có thể cache; caller chuyển thành list nếu cần
     return tuple(result.embeddings[0].values)
 
 
-async def expand_query(query: str, n: int = 3) -> list[str]:
+async def expand_query(query: str, n: int = 1) -> list[str]:
     """
     Tạo N cách diễn đạt khác nhau cho query gốc (query expansion).
-    Giúp retrieval bắt được nhiều chunk liên quan hơn dù user diễn đạt khác cách.
-    Dùng model nhẹ (summary_model) để tối ưu latency.
-    Returns danh sách queries mở rộng (không bao gồm query gốc).
+    Default n=1 để tránh quá nhiều concurrent LLM calls với multi-agent.
+    Retry tự động khi gặp 429 RESOURCE_EXHAUSTED.
+    Returns list rỗng nếu thất bại (graceful degradation).
     """
+    if n <= 0:
+        return []
+
     config = get_llm_config()
     client = get_genai_client()
 
@@ -77,20 +110,23 @@ async def expand_query(query: str, n: int = 3) -> list[str]:
         f"Câu gốc: {query}"
     )
 
-    try:
-        response = await client.aio.models.generate_content(
+    async def _call():
+        return await client.aio.models.generate_content(
             model=config.llm.summary_model,
             contents=prompt,
         )
+
+    try:
+        response = await _with_retry(_call)
         lines = [line.strip() for line in (response.text or "").splitlines() if line.strip()]
         return lines[:n]
     except Exception as exc:
         logger.warning("query_expansion_failed", error=str(exc))
-        return []
+        return []  # graceful degradation — dùng query gốc
 
 
 def get_embeddings_batch(texts: list[str], batch_size: int | None = None) -> list[list[float]]:
-    """Embed nhiều đoạn text theo batch."""
+    """Embed nhiều đoạn text theo batch (RETRIEVAL_DOCUMENT)."""
     config = get_llm_config()
     client = get_genai_client()
     all_embeddings: list[list[float]] = []

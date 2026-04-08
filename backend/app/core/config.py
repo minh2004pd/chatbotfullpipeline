@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     top_k_results: int = 5
     score_threshold: float = 0.6  # loại bỏ RAG results có relevance score thấp hơn
     memory_search_limit: int = 15  # search nhiều hơn rồi rerank, trả về top-7
-    query_expansion_count: int = 3  # số queries mở rộng khi tìm kiếm RAG
+    query_expansion_count: int = 1  # số queries mở rộng; giữ thấp với multi-agent để tránh 429
 
     @field_validator("allowed_origins", mode="before")
     @classmethod

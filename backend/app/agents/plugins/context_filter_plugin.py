@@ -25,7 +25,7 @@ from google.genai.types import Content, Part
 
 from app.core.config import get_settings
 from app.core.llm_config import get_llm_config
-from app.utils.gemini_utils import get_genai_client
+from app.utils.gemini_utils import _with_retry, get_genai_client
 
 logger = structlog.get_logger(__name__)
 
@@ -164,10 +164,13 @@ async def _generate_summary(contents: list, existing_summary: str) -> str:
         f"---\n{transcript}"
     )
 
-    response = await client.aio.models.generate_content(
-        model=config.llm.summary_model,
-        contents=prompt,
-    )
+    async def _call():
+        return await client.aio.models.generate_content(
+            model=config.llm.summary_model,
+            contents=prompt,
+        )
+
+    response = await _with_retry(_call)
     return response.text or ""
 
 
