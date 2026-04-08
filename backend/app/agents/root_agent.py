@@ -38,8 +38,10 @@ def get_root_agent() -> LlmAgent:
         description="MemRAG Chatbot - AI assistant với RAG và long-term memory",
         instruction=config.prompts.system_instruction,
         tools=[
-            AgentTool(agent=get_docs_agent()),
-            AgentTool(agent=get_meeting_agent()),
+            # skip_summarization=True: trả nguyên văn kết quả sub-agent về Root
+            # để Root tự tổng hợp — không để ADK summarize mất chi tiết
+            AgentTool(agent=get_docs_agent(), skip_summarization=True),
+            AgentTool(agent=get_meeting_agent(), skip_summarization=True),
             retrieve_memories,
             store_memory,
         ],
