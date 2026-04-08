@@ -121,11 +121,9 @@ Sub-agents dùng `InMemorySessionService` (ephemeral per-invocation), **không**
 ## Model Hierarchy
 
 ```
-gemini-2.5-flash        Root Agent
-  ↳ reasoning phức tạp, tổng hợp nhiều nguồn, điều phối
-
-gemini-2.0-flash        DocsAgent, MeetingAgent, Summarization
-  ↳ retrieval + extraction (không cần reasoning sâu)
+gemini-2.0-flash        Root Agent, DocsAgent, MeetingAgent, Summarization
+  ↳ stable model, quota cao ở Paid Tier 1
+  ↳ ⚠️ gemini-2.5-flash (preview) có quota thấp ở Paid Tier 1 → tránh dùng cho đến khi lên Tier 2
   ↳ ⚠️ gemini-2.0-flash-lite đã deprecated (404 NOT_FOUND)
 ```
 
