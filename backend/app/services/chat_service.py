@@ -1,5 +1,7 @@
 """Chat Service: orchestrate ADK agent runs."""
 
+import asyncio
+import random
 import uuid
 from typing import AsyncIterator
 
@@ -156,31 +158,61 @@ class ChatService:
         )
 
         run_config = RunConfig(streaming_mode=StreamingMode.SSE)
-        yielded_any = False
+        max_retries = 3
 
-        try:
-            async for event in self.runner.run_async(
-                user_id=request.user_id,
-                session_id=session_id,
-                new_message=_build_user_content(request),
-                run_config=run_config,
-            ):
-                if event.partial and event.content and event.content.parts:
-                    for part in event.content.parts:
-                        if part.text:
-                            yielded_any = True
-                            yield part.text
-                elif event.is_final_response() and event.content and event.content.parts:
-                    # Fallback: partial events không cover → lấy final response
-                    for part in event.content.parts:
-                        if part.text and not yielded_any:
-                            yield part.text
-        except Exception as exc:
-            logger.error(
-                "chat_stream_error",
-                user_id=request.user_id,
-                session_id=session_id,
-                error=str(exc),
-                exc_info=True,
-            )
-            yield f"\n\n[Lỗi xử lý: {exc}]"
+        for attempt in range(max_retries):
+            if attempt > 0:
+                delay = (2**attempt) + random.uniform(0, 1)
+                logger.warning(
+                    "chat_stream_retry",
+                    attempt=attempt,
+                    delay=round(delay, 2),
+                    user_id=request.user_id,
+                )
+                await asyncio.sleep(delay)
+
+            yielded_any = False
+
+            try:
+                async for event in self.runner.run_async(
+                    user_id=request.user_id,
+                    session_id=session_id,
+                    new_message=_build_user_content(request),
+                    run_config=run_config,
+                ):
+                    if event.partial and event.content and event.content.parts:
+                        for part in event.content.parts:
+                            if part.text:
+                                yielded_any = True
+                                yield part.text
+                    elif event.is_final_response() and event.content and event.content.parts:
+                        # Fallback: partial events không cover → lấy final response
+                        for part in event.content.parts:
+                            if part.text and not yielded_any:
+                                yield part.text
+                return  # thành công → dừng retry
+            except Exception as exc:
+                is_rate_limit = "RESOURCE_EXHAUSTED" in str(exc) or "429" in str(exc)
+
+                if is_rate_limit and not yielded_any and attempt < max_retries - 1:
+                    # Chưa yield gì + còn lượt retry → thử lại
+                    logger.warning(
+                        "chat_stream_429_retry",
+                        attempt=attempt,
+                        error=str(exc)[:100],
+                    )
+                    continue
+
+                logger.error(
+                    "chat_stream_error",
+                    user_id=request.user_id,
+                    session_id=session_id,
+                    attempt=attempt,
+                    error=str(exc),
+                    exc_info=True,
+                )
+                if is_rate_limit:
+                    yield "\n\n[API Gemini đang quá tải, vui lòng thử lại sau vài giây.]"
+                else:
+                    yield f"\n\n[Lỗi xử lý: {exc}]"
+                return

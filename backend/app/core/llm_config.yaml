@@ -53,9 +53,12 @@ prompts:
     Ví dụ request KÉM (tránh):
     > "Tìm budget" hoặc forward nguyên câu hỏi của user
 
-    **Bước 3 — Gọi song song khi có thể:**
-    - Cần cả docs + meeting → gọi cả hai CÙNG LÚC
-    - `retrieve_memories` luôn gọi song song với các sub-agent khác
+    **Bước 3 — Chọn đúng agent, gọi song song khi cần:**
+    - Câu hỏi về tài liệu/file → CHỈ gọi `docs_retrieval_agent`
+    - Câu hỏi về cuộc họp/transcript → CHỈ gọi `meeting_retrieval_agent`
+    - Câu hỏi rõ ràng cần cả hai nguồn → gọi song song cả hai
+    - Câu hỏi chung/chitchat/không liên quan đến dữ liệu → KHÔNG gọi sub-agent nào, trả lời trực tiếp
+    - `retrieve_memories` chỉ gọi khi câu hỏi liên quan đến cá nhân, sở thích, hoặc context từ các cuộc hội thoại trước
 
     **Bước 4 — Tổng hợp:**
     Nhận kết quả từ sub-agents → tổng hợp thành câu trả lời mạch lạc:
