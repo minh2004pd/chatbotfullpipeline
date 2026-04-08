@@ -1,24 +1,25 @@
-# Multi-Agent Architecture — MemRAG
+# Agent Architecture — MemRAG
 
 ## Tổng quan
 
-MemRAG dùng **Google ADK multi-agent pattern** với 3 agents phân tầng theo trách nhiệm:
+MemRAG dùng **single agent** với Google ADK, model `gemini-2.5-flash`:
 
 ```
-Root Agent  (gemini-2.5-flash)   — reasoning, orchestration, tổng hợp
-  ├── DocsAgent    (gemini-2.0-flash)  — tra cứu tài liệu PDF/file
-  └── MeetingAgent (gemini-2.0-flash)  — tra cứu transcript cuộc họp
+Root Agent  (gemini-2.5-flash)
+  ├── search_documents          — tìm trong tài liệu PDF/file (Qdrant)
+  ├── search_meeting_transcripts— tìm trong transcript cuộc họp (Qdrant)
+  ├── list_user_documents       — liệt kê file đã upload
+  ├── retrieve_memories         — mem0 long-term memory (search limit=15, top-7)
+  └── store_memory              — lưu vào mem0
 ```
 
-Memory và context được xử lý trực tiếp bởi Root Agent (không qua sub-agent):
-- `retrieve_memories` / `store_memory` — mem0 long-term memory
-- `ContextFilterPlugin` — session context management
+Context được xử lý bởi `ContextFilterPlugin` chạy như `before_model_callback`.
+
+> **Lý do không dùng multi-agent**: Multi-agent (DocsAgent + MeetingAgent chạy song song) tạo nhiều LLM calls đồng thời, dễ hit 429 RESOURCE_EXHAUSTED ở Paid Tier 1. Single agent với direct tools đơn giản hơn, ít calls hơn, và gemini-2.5-flash đủ mạnh để tự quyết định khi nào gọi tool nào.
 
 ---
 
-## Kiến trúc chi tiết
-
-### Request Flow
+## Request Flow
 
 ```
 POST /api/v1/chat/stream
@@ -29,102 +30,28 @@ _ensure_session()           ← tạo session + inject user_id vào state
     ↓
 Runner.run_async()
     ↓
-ContextFilterPlugin         ← before_model_callback, chỉ chạy trên Root
+ContextFilterPlugin         ← before_model_callback
     ↓
 Root Agent (gemini-2.5-flash)
     │
-    │ Phân tích query → formulate specific requests
+    │ Phân tích query → quyết định tool nào cần gọi
     │
-    ├──[parallel]── AgentTool(DocsAgent)
-    │                   ↓
-    │               DocsAgent (gemini-2.0-flash)
-    │                   ↓ search_documents (async → asyncio.to_thread → Qdrant)
-    │                   ↓ list_user_documents (nếu cần)
-    │                   ↓ extract + format kết quả
-    │                   → trả structured text về Root
-    │
-    ├──[parallel]── AgentTool(MeetingAgent)
-    │                   ↓
-    │               MeetingAgent (gemini-2.0-flash)
-    │                   ↓ search_meeting_transcripts (async → asyncio.to_thread → Qdrant)
-    │                   ↓ retry nếu rỗng
-    │                   ↓ extract + format kết quả
-    │                   → trả structured text về Root
-    │
-    └── retrieve_memories (direct tool)
-            ↓ mem0 search (limit=15) → rerank by score → top-7
-            → trả memories về Root
+    ├── search_documents(query)           → Qdrant (asyncio.to_thread)
+    ├── search_meeting_transcripts(query) → Qdrant (asyncio.to_thread)
+    ├── list_user_documents()             → Qdrant
+    ├── retrieve_memories(query)          → mem0 (limit=15, top-7)
+    └── store_memory(content)             → mem0
     ↓
-Root Agent tổng hợp → stream response về client
+Agent tổng hợp → stream response về client
 ```
-
-### Tại sao chọn AgentTool thay vì ParallelAgent/SequentialAgent?
-
-| | AgentTool | ParallelAgent |
-|--|-----------|---------------|
-| **Control** | Root tự quyết định khi nào gọi agent nào | Luôn chạy cả hai dù không cần |
-| **Cost** | Chỉ tốn khi được gọi | Tốn cả hai mọi request |
-| **Retry** | Mỗi agent tự retry query | Khó retry selective |
-| **Context** | Request cụ thể từ Root | Không rõ ràng |
-| **Parallel** | Gemini native parallel function calls | Cũng parallel |
 
 ---
 
-## AgentTool — Cơ chế giao tiếp (xác nhận từ source code)
-
-### Input: Root → Sub-agent
-
-Root Agent gọi sub-agent với một `request` string. ADK chuyển thành:
-
-```python
-# agent_tool.py (ADK source)
-content = Content(role='user', parts=[Part.from_text(text=args['request'])])
-```
-
-Sub-agent nhận request như **user message** — hoàn toàn như user gõ vào.
-
-Root Agent **phải** formulate request rõ ràng, ví dụ:
-```
-"Tìm thông tin về ngân sách Q1 2024: số tiền phê duyệt, hạng mục chi tiêu,
- người phụ trách. Mục đích: trả lời câu hỏi budget Q1 được duyệt bao nhiêu."
-```
-
-### Session State
-
-```python
-# AgentTool copy toàn bộ parent state sang sub-agent (lọc bỏ _adk internal)
-state_dict = {k: v for k, v in parent_state.items() if not k.startswith('_adk')}
-# → sub-agent có user_id, max_context_messages, v.v.
-
-# State delta từ sub-agent được propagate ngược về parent
-if event.actions.state_delta:
-    tool_context.state.update(event.actions.state_delta)
-```
-
-### Output: Sub-agent → Root
-
-```python
-# AgentTool lấy last_content từ sub-agent
-merged_text = '\n'.join(p.text for p in last_content.parts
-                        if p.text and not p.thought)
-# → trả raw text về Root (với skip_summarization=True)
-```
-
-**`skip_summarization=True` là bắt buộc** — nếu False, ADK summarize output trước khi trả Root, mất chi tiết.
-
-### Sub-agent Session
-
-Sub-agents dùng `InMemorySessionService` (ephemeral per-invocation), **không** dùng DynamoDB. Chỉ Root Agent session mới được persist.
-
----
-
-## Model Hierarchy
+## Model
 
 ```
-gemini-2.0-flash        Root Agent, DocsAgent, MeetingAgent, Summarization
-  ↳ stable model, quota cao ở Paid Tier 1
-  ↳ ⚠️ gemini-2.5-flash (preview) có quota thấp ở Paid Tier 1 → tránh dùng cho đến khi lên Tier 2
-  ↳ ⚠️ gemini-2.0-flash-lite đã deprecated (404 NOT_FOUND)
+gemini-2.5-flash    Root Agent (reasoning, tool calling, tổng hợp)
+gemini-2.0-flash    Summarization (summary_model trong ContextFilterPlugin)
 ```
 
 Config tại: `backend/app/core/llm_config.yaml`
@@ -135,7 +62,7 @@ Config tại: `backend/app/core/llm_config.yaml`
 
 ### ContextFilterPlugin (`agents/plugins/context_filter_plugin.py`)
 
-Chạy như `before_model_callback` **chỉ trên Root Agent**, không ảnh hưởng sub-agents.
+Chạy như `before_model_callback` trên Root Agent.
 
 ```
 n = len(conversation_history)
@@ -164,7 +91,7 @@ Summary format có cấu trúc 4 sections:
 Config (tunable qua `.env`):
 ```
 MAX_CONTEXT_MESSAGES=20    # threshold để bắt đầu summarize
-SUMMARY_THRESHOLD=22       # = max_context + 2, đóng gap
+SUMMARY_THRESHOLD=22       # = max_context + 2
 SUMMARY_KEEP_RECENT=10     # messages gần nhất giữ lại
 ```
 
@@ -172,7 +99,7 @@ SUMMARY_KEEP_RECENT=10     # messages gần nhất giữ lại
 
 ## RAG Retrieval Pipeline
 
-### search_documents (DocsAgent)
+### search_documents
 
 ```python
 async def search_documents(query, tool_context):
@@ -186,11 +113,11 @@ async def search_documents(query, tool_context):
     # 4. Top-k = 5
 ```
 
-### search_meeting_transcripts (MeetingAgent)
+### search_meeting_transcripts
 
 Cùng pattern, search trong collection `meetings` thay vì `rag_documents`.
 
-### retrieve_memories (Root Agent)
+### retrieve_memories
 
 ```python
 def retrieve_memories(query, tool_context):
@@ -202,13 +129,38 @@ def retrieve_memories(query, tool_context):
 
 ---
 
+## Retry & Rate Limiting
+
+### Chat stream retry (chat_service.py)
+
+```python
+# Tự động retry khi gặp 429 RESOURCE_EXHAUSTED
+# Chỉ retry nếu chưa yield gì (tránh duplicate content)
+# Max 3 attempts, exponential backoff với jitter
+
+attempt=0 → fail → delay ~2s
+attempt=1 → fail → delay ~4s
+attempt=2 → fail → yield error message
+```
+
+### Gemini utils retry (gemini_utils._with_retry)
+
+Áp dụng cho `_generate_summary()` (summarization):
+```
+attempt=1 → delay ~1.0s
+attempt=2 → delay ~2.x s (+ random jitter)
+attempt=3 → delay ~4.x s (capped at 10s)
+```
+
+---
+
 ## Files liên quan
 
 ```
 backend/app/agents/
-  root_agent.py          Root Agent definition + AgentTool wiring
-  docs_agent.py          DocsAgent (search_documents, list_user_documents)
-  meeting_agent.py       MeetingAgent (search_meeting_transcripts)
+  root_agent.py          Root Agent definition + tools wiring
+  docs_agent.py          (không dùng — giữ lại cho tham khảo)
+  meeting_agent.py       (không dùng — giữ lại cho tham khảo)
   plugins/
     context_filter_plugin.py  Context summarization callback
   tools/
@@ -218,65 +170,9 @@ backend/app/agents/
     files_retrieval_tool.py   list_user_documents
 
 backend/app/core/
-  llm_config.yaml        Model names, temperatures, system prompts cho cả 3 agents
+  llm_config.yaml        Model names, temperatures, system prompt
   llm_config.py          Pydantic models cho config
 
 backend/app/utils/
   gemini_utils.py        get_query_embedding (cached), _with_retry (backoff 429)
 ```
-
----
-
-## Retry & Rate Limiting
-
-```python
-# gemini_utils._with_retry()
-# Tự động retry khi gặp 429 RESOURCE_EXHAUSTED
-# Max 3 attempts, exponential backoff với jitter
-
-attempt=1 → delay ~1.0s
-attempt=2 → delay ~2.x s (+ random jitter)
-attempt=3 → delay ~4.x s (capped at 10s)
-```
-
-Áp dụng cho: `expand_query()`, `_generate_summary()`.
-
----
-
-## Thêm Sub-agent mới
-
-1. Tạo `backend/app/agents/<name>_agent.py`:
-```python
-@lru_cache
-def get_<name>_agent() -> LlmAgent:
-    config = get_llm_config()
-    return LlmAgent(
-        name="<name>_agent",
-        model=config.llm.retrieval_model,
-        description="...",  # Root dùng description để quyết định khi nào gọi
-        instruction=config.prompts.<name>_agent_instruction,
-        tools=[...],
-        generate_content_config=GenerateContentConfig(temperature=0.1, ...),
-    )
-```
-
-2. Thêm instruction vào `backend/app/core/llm_config.yaml`:
-```yaml
-prompts:
-  <name>_agent_instruction: |
-    ## VAI TRÒ
-    ...
-    ## QUY TRÌNH
-    ...
-    ## RÀNG BUỘC
-    ...
-```
-
-3. Thêm `PromptsSettings.<name>_agent_instruction` vào `llm_config.py`.
-
-4. Đăng ký trong `root_agent.py`:
-```python
-AgentTool(agent=get_<name>_agent(), skip_summarization=True),
-```
-
-5. Cập nhật `system_instruction` của Root Agent để biết khi nào delegate cho agent mới.
