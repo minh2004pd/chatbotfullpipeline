@@ -17,7 +17,7 @@ from pydantic import BaseModel
 class LLMSettings(BaseModel):
     model: str = "gemini-2.5-flash"
     retrieval_model: str = "gemini-2.0-flash"  # sub-agents chỉ cần retrieve, không reason phức tạp
-    summary_model: str = "gemini-2.0-flash-lite"  # model nhẹ nhất cho summarization
+    summary_model: str = "gemini-2.0-flash"  # summarization (flash-lite đã deprecated)
     temperature: float = 0.7
     top_p: float = 0.95
     top_k: int = 40

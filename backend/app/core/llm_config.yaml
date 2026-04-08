@@ -6,7 +6,7 @@
 llm:
   model: "gemini-2.5-flash"           # root agent — reasoning + tổng hợp
   retrieval_model: "gemini-2.0-flash"  # sub-agents — chỉ retrieve, không reason phức tạp
-  summary_model: "gemini-2.0-flash-lite"  # summarization — tác vụ đơn giản nhất
+  summary_model: "gemini-2.0-flash"   # summarization — flash-lite đã deprecated
   temperature: 0.7
   top_p: 0.95
   top_k: 40
