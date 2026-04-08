@@ -156,14 +156,31 @@ class ChatService:
         )
 
         run_config = RunConfig(streaming_mode=StreamingMode.SSE)
+        yielded_any = False
 
-        async for event in self.runner.run_async(
-            user_id=request.user_id,
-            session_id=session_id,
-            new_message=_build_user_content(request),
-            run_config=run_config,
-        ):
-            if event.partial and event.content and event.content.parts:
-                for part in event.content.parts:
-                    if part.text:
-                        yield part.text
+        try:
+            async for event in self.runner.run_async(
+                user_id=request.user_id,
+                session_id=session_id,
+                new_message=_build_user_content(request),
+                run_config=run_config,
+            ):
+                if event.partial and event.content and event.content.parts:
+                    for part in event.content.parts:
+                        if part.text:
+                            yielded_any = True
+                            yield part.text
+                elif event.is_final_response() and event.content and event.content.parts:
+                    # Fallback: partial events không cover → lấy final response
+                    for part in event.content.parts:
+                        if part.text and not yielded_any:
+                            yield part.text
+        except Exception as exc:
+            logger.error(
+                "chat_stream_error",
+                user_id=request.user_id,
+                session_id=session_id,
+                error=str(exc),
+                exc_info=True,
+            )
+            yield f"\n\n[Lỗi xử lý: {exc}]"

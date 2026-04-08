@@ -32,9 +32,13 @@ async def chat_stream(
     request.user_id = user_id
 
     async def generate():
-        async for chunk in service.chat_stream(request):
-            yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
-        yield f"data: {json.dumps({'content': '', 'done': True})}\n\n"
+        try:
+            async for chunk in service.chat_stream(request):
+                yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'content': f'[Error: {exc}]', 'done': False})}\n\n"
+        finally:
+            yield f"data: {json.dumps({'content': '', 'done': True})}\n\n"
 
     return StreamingResponse(
         generate(),

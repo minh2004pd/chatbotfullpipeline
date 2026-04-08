@@ -56,15 +56,19 @@ HTTP Request → FastAPI Router (api/v1/) → Service Layer → Repository / ADK
 
 ### Key Design Decisions
 
-**ADK Agent** (`agents/root_agent.py`): Uses `lru_cache` on `get_runner()` — singleton per process. The `Runner` takes `app_name="memrag"` and `DynamoDBSessionService`. Sessions are created per `(user_id, session_id)` pair via `_ensure_session()` before each `runner.run_async()` call. `get_runner()` is defined in `core/dependencies.py` (not in `root_agent.py`) to avoid circular imports.
+**Multi-Agent Architecture** (`agents/`): 3-tier agent system dùng Google ADK `AgentTool`. Root Agent (gemini-2.5-flash) orchestrate, formulate specific requests và delegate sang DocsAgent + MeetingAgent (gemini-2.0-flash) chạy song song. Sub-agents dùng `InMemorySessionService` (ephemeral per-invocation), nhận parent session state qua copy, propagate state delta ngược về parent. **`skip_summarization=True` bắt buộc** trên mỗi AgentTool — nếu False, ADK summarize mất chi tiết trước khi trả Root. Xem `docs/multi-agent-architecture.md` để hiểu đầy đủ. Để debug dùng `/adk-debug`.
 
-**Streaming** (`services/chat_service.py`): `chat_stream` passes `RunConfig(streaming_mode=StreamingMode.SSE)` to `runner.run_async()` — this enables token-level streaming from Gemini. Import: `from google.adk.agents.run_config import RunConfig, StreamingMode`. Yield on `event.partial` (not `event.is_final_response()`) to get incremental chunks.
+**ADK Runner** (`core/dependencies.py`): `get_runner()` dùng `lru_cache` — singleton per process. Runner nhận `app_name="memrag"` và `DynamoDBSessionService`. Sessions tạo per `(user_id, session_id)` qua `_ensure_session()` trước mỗi `runner.run_async()`. `get_runner()` định nghĩa trong `core/dependencies.py` (không trong `root_agent.py`) để tránh circular imports.
 
-**Tools vs Services**: The 4 ADK tools (`qdrant_search_tool`, `mem0_tools`, `files_retrieval_tool`, `pdf_ingestion_tool`) are called by the agent during inference. The `RAGService` and `MemoryService` are called directly by HTTP endpoints (upload, list, delete). Both paths share the same repositories.
+**Streaming** (`services/chat_service.py`): `chat_stream` pass `RunConfig(streaming_mode=StreamingMode.SSE)` vào `runner.run_async()`. Yield trên `event.partial` (không phải `event.is_final_response()`) để lấy incremental chunks.
 
-**ContextFilterPlugin** (`agents/plugins/context_filter_plugin.py`): Implemented as an **async** `before_model_callback` on `LlmAgent`. Có 2 chế độ:
-- **Truncation** (đơn giản): khi `max_context_messages < len(contents) < summary_threshold` → giữ N messages cuối.
-- **Summarization** (tự động): khi `len(contents) >= summary_threshold` (default 30) hoặc đã có summary → gọi Gemini tóm tắt messages cũ, lưu `conversation_summary` + `summary_covered_count` vào ADK session state (tự persist DynamoDB), inject `[summary_msg + summary_ack] + recent_messages` vào `llm_request.contents`. Re-summarize khi có thêm `summary_threshold - summary_keep_recent` messages mới. Frontend vẫn load full history từ DynamoDB — chỉ BE dùng summary.
+**Tools vs Services**: ADK tools (`search_documents`, `search_meeting_transcripts`, `retrieve_memories`, `store_memory`, `list_user_documents`) được gọi bởi agents trong inference. `RAGService` và `MemoryService` được gọi trực tiếp bởi HTTP endpoints (upload, list, delete). Cả hai path share cùng repositories.
+
+**ContextFilterPlugin** (`agents/plugins/context_filter_plugin.py`): `before_model_callback` trên Root Agent (không ảnh hưởng sub-agents). Mọi `n > max_context_messages` đều đi qua summarization — không còn truncation path:
+- **Lần đầu** (chưa có summary): blocking, chờ Gemini tóm tắt
+- **Lần sau** (đã có summary): inject summary cũ ngay + fire-and-forget re-summarize background
+- Summary format có cấu trúc 4 sections, dùng `summary_model` (gemini-2.0-flash)
+- `conversation_summary` + `summary_covered_count` persist vào DynamoDB qua ADK session state
 
 **Database clients** (`core/database.py`): All clients (`get_qdrant_client`, `get_async_qdrant_client`, `get_mem0_client`, `get_dynamodb_resource`) use `lru_cache` — single instance per process. `ensure_collections()` và `ensure_dynamo_table()` đều được gọi at app startup trong `lifespan`.
 
@@ -91,7 +95,8 @@ HTTP Request → FastAPI Router (api/v1/) → Service Layer → Repository / ADK
 - `QDRANT_URL` is overridden to `http://qdrant:6333` by docker-compose `environment` block, overriding `.env`'s `http://localhost:6333`.
 - `DYNAMODB_ENDPOINT_URL=http://dynamodb-local:8000` được set trong docker-compose `environment` block (local). Để trống = real AWS DynamoDB.
 - **CloudFront reverse proxy**: Production CloudFront distribution routes `/api/*` → EC2 backend (HTTP :8000) and `/*` → S3 frontend. FE is built with `VITE_API_BASE_URL=""` so axios uses relative URLs — same-origin, no CORS needed. `compress=false` on the `/api/*` behavior prevents buffering SSE streams at the edge.
-- **Context summarization config** (tunable via `.env`): `SUMMARY_THRESHOLD=30`, `SUMMARY_KEEP_RECENT=10`, `MAX_CONTEXT_MESSAGES=20`.
+- **Context summarization config** (tunable via `.env`): `SUMMARY_THRESHOLD=22`, `SUMMARY_KEEP_RECENT=10`, `MAX_CONTEXT_MESSAGES=20`. `SCORE_THRESHOLD=0.6` loại RAG results thấp. `MEMORY_SEARCH_LIMIT=15` search rộng rồi rerank top-7.
+- **Model config** (`core/llm_config.yaml`): `model` (Root), `retrieval_model` (sub-agents), `summary_model`. ⚠️ `gemini-2.0-flash-lite` đã deprecated — dùng `gemini-2.0-flash`.
 - **Soniox config** (local `.env`): `SONIOX_API_KEY=xxx`, `SONIOX_MODEL=stt-rt-preview` (default), `SONIOX_TARGET_LANG=vi` (default). Không cần thay đổi docker-compose — Soniox là external API.
 
 ### Dependency Injection
@@ -135,3 +140,19 @@ Use **Conventional Commits**: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `
 - Vietnamese comments and responses are fine.
 - Update `docs/` after adding or changing a feature.
 - Changing embedding dimension requires a full Qdrant reset: `docker compose down -v && docker compose up -d` (all data lost).
+
+## Skills
+
+| Skill | Dùng khi |
+|-------|----------|
+| `/adk-debug` | Debug ADK agents, tools, session state, multi-agent issues |
+| `/lint-fix` | Auto-fix ruff format + lint trước khi commit |
+| `/verify` | Chạy full test suite với coverage |
+| `/verify-fe` | TypeScript + ESLint + Vite build cho frontend |
+| `/check-all` | Full pre-push: backend lint + test + frontend build |
+
+## Key Docs
+
+- `docs/multi-agent-architecture.md` — Chi tiết kiến trúc 3-tier agents, AgentTool communication, context management
+- `docs/cicd-flow.md` — CI/CD pipeline
+- `docs/spec.md` — Product spec
