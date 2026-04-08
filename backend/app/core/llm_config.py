@@ -16,6 +16,8 @@ from pydantic import BaseModel
 
 class LLMSettings(BaseModel):
     model: str = "gemini-2.5-flash"
+    retrieval_model: str = "gemini-2.0-flash"  # sub-agents chỉ cần retrieve, không reason phức tạp
+    summary_model: str = "gemini-2.0-flash-lite"  # model nhẹ nhất cho summarization
     temperature: float = 0.7
     top_p: float = 0.95
     top_k: int = 40
@@ -30,12 +32,15 @@ class EmbeddingSettings(BaseModel):
 
 class PromptsSettings(BaseModel):
     system_instruction: str = ""
+    docs_agent_instruction: str = ""
+    meeting_agent_instruction: str = ""
 
 
 class RAGSettings(BaseModel):
     chunk_size: int = 1000
     chunk_overlap: int = 200
     top_k_results: int = 5
+    score_threshold: float = 0.6  # bỏ kết quả có relevance score thấp hơn ngưỡng này
     max_doc_length: int = 8192
     max_query_length: int = 2048
 

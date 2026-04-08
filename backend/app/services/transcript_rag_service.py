@@ -76,6 +76,7 @@ class TranscriptRAGService:
         query_vector: list[float],
         user_id: str | None = None,
         top_k: int = 5,
+        score_threshold: float = 0.0,
     ) -> list[dict]:
         """Tìm kiếm transcript chunks theo embedding vector."""
         from qdrant_client.models import FieldCondition, Filter, MatchValue
@@ -91,6 +92,7 @@ class TranscriptRAGService:
             query=query_vector,
             query_filter=query_filter,
             limit=top_k,
+            score_threshold=score_threshold,
             with_payload=True,
         ).points
 

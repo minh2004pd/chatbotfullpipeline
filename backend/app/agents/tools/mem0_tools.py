@@ -3,15 +3,22 @@
 import structlog
 from google.adk.tools import ToolContext
 
+from app.core.config import get_settings
 from app.core.database import get_mem0_client
 from app.repositories.mem0_repo import Mem0Repository
 
 logger = structlog.get_logger(__name__)
 
+# Số memories tối thiểu trả về sau reranking
+_MEMORY_RETURN_LIMIT = 7
+
 
 def retrieve_memories(query: str, tool_context: ToolContext) -> dict:
     """
     Lấy các ký ức liên quan của người dùng từ long-term memory.
+
+    Tìm rộng (memory_search_limit) rồi rerank theo relevance score,
+    trả về top-7 chất lượng cao nhất.
 
     Args:
         query: Câu hỏi hoặc chủ đề cần tìm ký ức liên quan.
@@ -20,25 +27,40 @@ def retrieve_memories(query: str, tool_context: ToolContext) -> dict:
     Returns:
         Dict với danh sách memories liên quan đến query.
     """
+    settings = get_settings()
     user_id = tool_context.state.get("user_id", "default_user")
 
     try:
         repo = Mem0Repository(get_mem0_client())
-        memories = repo.search_memory(query=query, user_id=user_id, limit=5)
+        # Search nhiều hơn → rerank → trả về top tốt nhất
+        raw_memories = repo.search_memory(
+            query=query,
+            user_id=user_id,
+            limit=settings.memory_search_limit,
+        )
 
-        if not memories:
+        if not raw_memories:
             return {"found": False, "memories": [], "message": "Không có ký ức liên quan."}
+
+        # Rerank: sort descending by score (mem0 đã tính vector similarity)
+        ranked = sorted(raw_memories, key=lambda m: m.get("score", 0.0), reverse=True)
+        top = ranked[:_MEMORY_RETURN_LIMIT]
 
         formatted = [
             {
                 "memory": m.get("memory", ""),
                 "id": m.get("id", ""),
-                "score": round(m.get("score", 0), 4) if m.get("score") else None,
+                "score": round(m.get("score", 0.0), 4) if m.get("score") is not None else None,
             }
-            for m in memories
+            for m in top
         ]
 
-        logger.info("memories_retrieved", user_id=user_id, count=len(formatted))
+        logger.info(
+            "memories_retrieved",
+            user_id=user_id,
+            searched=len(raw_memories),
+            returned=len(formatted),
+        )
         return {"found": True, "memories": formatted, "count": len(formatted)}
 
     except Exception as e:

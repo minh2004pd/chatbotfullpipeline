@@ -8,16 +8,6 @@ output "ecs_cluster_name" {
   value       = aws_ecs_cluster.main.name
 }
 
-output "ec2_public_ip" {
-  description = "Elastic IP (tĩnh) của EC2 cũ — giữ lại đến Phase 5 cutover"
-  value       = aws_eip.backend.public_ip
-}
-
-output "ec2_public_dns" {
-  description = "Public DNS của EC2 cũ — giữ lại đến Phase 5 cutover"
-  value       = "http://${aws_eip.backend.public_dns}:${var.container_port}"
-}
-
 output "alb_dns_name" {
   description = "ALB DNS name — CloudFront /api/* trỏ vào đây"
   value       = aws_lb.backend.dns_name

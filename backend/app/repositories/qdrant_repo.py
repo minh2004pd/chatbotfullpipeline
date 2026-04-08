@@ -53,6 +53,7 @@ class QdrantRepository:
         query_vector: list[float],
         user_id: str | None = None,
         top_k: int = 5,
+        score_threshold: float = 0.0,
     ) -> list[dict]:
         query_filter = None
         if user_id:
@@ -65,6 +66,7 @@ class QdrantRepository:
             query=query_vector,
             query_filter=query_filter,
             limit=top_k,
+            score_threshold=score_threshold,
             with_payload=True,
         ).points
 

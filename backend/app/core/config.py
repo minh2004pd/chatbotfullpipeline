@@ -67,11 +67,14 @@ class Settings(BaseSettings):
 
     # Context filter & summarization
     max_context_messages: int = 20  # simple truncation fallback
-    summary_threshold: int = 30  # trigger tóm tắt khi vượt quá số messages này
+    summary_threshold: int = 22  # = max_context_messages + 2, đóng gap hoàn toàn
     summary_keep_recent: int = 10  # giữ N messages gần nhất sau khi tóm tắt
     chunk_size: int = 1000
     chunk_overlap: int = 200
     top_k_results: int = 5
+    score_threshold: float = 0.6  # loại bỏ RAG results có relevance score thấp hơn
+    memory_search_limit: int = 15  # search nhiều hơn rồi rerank, trả về top-7
+    query_expansion_count: int = 3  # số queries mở rộng khi tìm kiếm RAG
 
     @field_validator("allowed_origins", mode="before")
     @classmethod

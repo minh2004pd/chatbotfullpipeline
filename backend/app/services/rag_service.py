@@ -62,11 +62,12 @@ class RAGService:
 
     def search(self, query: str, user_id: str | None = None) -> list[dict]:
         """Tìm kiếm tài liệu liên quan."""
-        query_vector = get_query_embedding(query)
+        query_vector = list(get_query_embedding(query))  # convert tuple to list
         return self.repo.search(
             query_vector=query_vector,
             user_id=user_id,
             top_k=self.settings.top_k_results,
+            score_threshold=self.settings.score_threshold,
         )
 
     def list_documents(self, user_id: str) -> list[dict]:

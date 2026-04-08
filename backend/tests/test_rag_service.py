@@ -102,7 +102,7 @@ def test_search_returns_results(rag_service, mock_qdrant_repo):
             "score": 0.92,
         }
     ]
-    with patch("app.services.rag_service.get_query_embedding", return_value=[0.1] * 768):
+    with patch("app.services.rag_service.get_query_embedding", return_value=tuple([0.1] * 768)):
         results = rag_service.search(query="câu hỏi test", user_id="user1")
 
     assert len(results) == 1
