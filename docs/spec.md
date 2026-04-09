@@ -1,7 +1,7 @@
 # MemRAG Chatbot — Spec hiện tại
 
 > Tài liệu này mô tả **trạng thái thực tế** của hệ thống (không phải spec thiết kế ban đầu).
-> Cập nhật lần cuối: 2026-04-07
+> Cập nhật lần cuối: 2026-04-09
 
 ---
 
@@ -23,12 +23,12 @@
 | Nhóm | Chi tiết |
 |------|----------|
 | **Chat** | Text + ảnh (base64 inline). Streaming SSE token-by-token qua `POST /api/v1/chat/stream`. Non-streaming qua `POST /api/v1/chat`. |
-| **RAG** | Upload PDF → chunk (LangChain TextSplitter, 1000/200 overlap) → embed (gemini-embedding-001, 768-dim) → Qdrant. Search qua `qdrant_search_tool` ADK tool. |
+| **RAG** | Upload PDF → chunk (LangChain TextSplitter, 1000/200 overlap) → embed (gemini-embedding-001, 768-dim) → Qdrant. Search qua `search_documents` ADK tool. Danh sách file qua `list_user_documents`. |
 | **Long-term Memory** | mem0ai lưu facts/preferences/summary per user_id vào Qdrant collection `mem0_memories`. Tools: `store_memory`, `retrieve_memory`. |
 | **Session Persistence** | `DynamoDBSessionService` extends ADK `BaseSessionService`. PK=`{app_name}#{user_id}`, SK=`session_id`. Title auto-extract từ first message. `GET /sessions`, `GET /sessions/{id}`, `DELETE /sessions/{id}`. |
 | **Context Filter** | `ContextFilterPlugin` — async `before_model_callback`. Truncation khi `max_context_messages < len < summary_threshold`; auto-summarize (Gemini) khi `≥ summary_threshold` (default 30). Summary lưu vào ADK session state → persist DynamoDB. Frontend vẫn load full history. |
 | **Realtime Transcription** | Soniox STT WebSocket. Flow: `POST /transcription/start` → `POST /transcription/audio/{id}` (binary PCM16) → `GET /transcription/stream/{id}` (SSE) → `POST /transcription/stop/{id}`. Agent có thể search transcript qua `search_meeting_transcripts` tool. |
-| **Meeting Storage** | DynamoDB `memrag-meetings` (single-table). Metadata: `PK=USER#{user_id}, SK=MEETING#{id}`; utterances: `PK=MEETING#{id}, SK=UTTERANCE#{ts}#{seq}`. Qdrant collection `meetings` lưu transcript chunks (time-window 60s / max 300 words). `GET /meetings`, `GET /meetings/{id}/transcript`, `DELETE /meetings/{id}`. |
+| **Meeting Storage** | DynamoDB `memrag-meetings` (single-table). Metadata: `PK=USER#{user_id}, SK=MEETING#{id}`; utterances: `PK=MEETING#{id}, SK=UTTERANCE#{ts}#{seq}`. Qdrant collection `meetings` lưu transcript chunks (time-window 60s / max 300 words). Danh sách meeting qua `list_meetings` ADK tool; search nội dung qua `search_meeting_transcripts`. `GET /meetings`, `GET /meetings/{id}/transcript`, `DELETE /meetings/{id}`. |
 | **File Storage** | S3 (production) hoặc local filesystem. Backend auto-switch qua `STORAGE_BACKEND` env var. Presigned URL 1h cho download. |
 | **Multiuser** | User identity từ `X-User-ID` request header (default `"default_user"`). Tất cả data scoped per user_id. |
 
@@ -71,10 +71,12 @@ CloudFront ──/api/*──► EC2:8000 (FastAPI + Uvicorn)
                     │  │  Google ADK Runner (singleton)  │   │
                     │  │  ├── LlmAgent (Gemini 2.5 Flash)│   │
                     │  │  │   ├── ContextFilterPlugin    │   │
-                    │  │  │   ├── qdrant_search_tool     │   │
-                    │  │  │   ├── pdf_ingestion_tool      │   │
-                    │  │  │   ├── mem0_tools              │   │
-                    │  │  │   └── search_meeting_transcripts│  │
+                    │  │  │   ├── search_documents       │   │
+                    │  │  │   ├── search_meeting_transcripts│  │
+                    │  │  │   ├── list_user_documents    │   │
+                    │  │  │   ├── list_meetings          │   │
+                    │  │  │   ├── retrieve_memories      │   │
+                    │  │  │   └── store_memory           │   │
                     │  │  └── DynamoDBSessionService      │   │
                     │  └────────────────────────────────┘   │
                     │                                        │

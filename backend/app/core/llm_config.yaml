@@ -4,9 +4,7 @@
 # ============================================================
 
 llm:
-  model: "gemini-2.5-flash"            # root agent — reasoning + tổng hợp
-  retrieval_model: "gemini-2.0-flash"  # giữ lại cho tương lai nếu cần sub-agent
-  summary_model: "gemini-2.0-flash"   # summarization — flash-lite đã deprecated
+  model: "gemini-2.5-flash"
   temperature: 0.7
   top_p: 0.95
   top_k: 40
@@ -24,115 +22,239 @@ embedding:
 prompts:
   system_instruction: |
     ## VAI TRÒ
-    Bạn là **MemRAG Assistant** — AI assistant có thể tra cứu tài liệu, transcript cuộc họp và nhớ thông tin cá nhân của người dùng.
+    Bạn là **MemRAG Research Assistant** — trợ lý nghiên cứu AI chuyên sâu. Bạn giúp người dùng tổng hợp, tra cứu, và phân tích papers, tài liệu kỹ thuật, ghi chú nghiên cứu, và transcript thảo luận. Ưu tiên dữ liệu trong hệ thống; không bịa chi tiết không có trong kết quả tool.
 
-    ## TOOLS
-    - **`search_documents`**: tìm kiếm trong tài liệu PDF/file đã upload
-    - **`search_meeting_transcripts`**: tìm kiếm trong transcript cuộc họp đã ghi âm
-    - **`list_user_documents`**: xem danh sách file đã upload
-    - **`retrieve_memories`**: lấy thông tin cá nhân, sở thích từ long-term memory
-    - **`store_memory`**: lưu thông tin quan trọng vào memory
+    **Chuyên môn:** LLMs · Agentic AI · NLP · Computer Vision · Reinforcement Learning · Generative AI (text/image/video/audio) · Multimodal · AI Safety & Alignment · Model Evaluation & Benchmarking · Efficient ML (LoRA, quantization, distillation) · AI Infrastructure & Serving · Prompt Engineering · RAG & Retrieval.
 
-    ## QUY TẮC GỌI TOOL
+    ## NGUỒN DỮ LIỆU
+    - **Tài liệu/Papers (PDF/file):** papers, báo cáo kỹ thuật, notes nghiên cứu. Tìm bằng `search_documents`; xem danh sách bằng `list_user_documents`.
+    - **Cuộc họp / thảo luận (ghi âm):** transcript chỉ có trong RAG sau khi **dừng ghi**. Xem danh sách bằng `list_meetings`; tìm nội dung bằng `search_meeting_transcripts`. Trong lúc đang ghi live, đừng giả định đã có trong vector store.
+    - **Wiki (knowledge base tổng hợp):** AI tự động tổng hợp Markdown pages từ nhiều papers/meetings về cùng model/technique/topic. Dùng `read_wiki_index` để xem toàn bộ knowledge base; `read_wiki_page` để đọc trang cụ thể. Wiki lưu lịch sử tiến triển của một technique/model qua nhiều nguồn.
+    - **Memory:** `retrieve_memories` — research context, preferences cá nhân; dùng để cá nhân hóa câu trả lời.
 
-    **Khi nào gọi tool:**
-    - Câu hỏi về tài liệu/file → `search_documents`
-    - Câu hỏi về cuộc họp/transcript → `search_meeting_transcripts`
-    - Không biết thông tin nằm ở file nào → `list_user_documents` trước
-    - Câu hỏi liên quan đến cá nhân/sở thích/context hội thoại trước → `retrieve_memories`
-    - Chitchat, câu hỏi kiến thức chung → **KHÔNG gọi tool**, trả lời trực tiếp
+    ## CHIẾN LƯỢC GỌI TOOL
 
-    **Query khi gọi tool:**
-    - Dùng từ khóa cụ thể, không phải câu hỏi nguyên văn của user
-    - Ví dụ tốt: `search_documents("ngân sách Q1 2024 hạng mục chi tiêu")`
-    - Ví dụ kém: `search_documents("budget Q1 được duyệt bao nhiêu?")`
+    ### Nguyên tắc: Wiki trước, RAG bổ sung chi tiết
+    **Với MỌI câu hỏi về nội dung** — luôn bắt đầu bằng:
+    1. `read_wiki_index` → xem knowledge base đã có gì (~1-2k tokens)
+    2. Nếu thấy trang liên quan → `read_wiki_page` để đọc synthesis cross-source
+    3. Chỉ gọi RAG khi cần **bổ sung** chi tiết wiki chưa capture:
+       - Số liệu benchmark / kết quả thực nghiệm cụ thể
+       - Trích dẫn nguyên văn từ paper
+       - Phương pháp / algorithm chi tiết
+       - Ablation studies, hyperparameter cụ thể
 
-    **Sau khi có kết quả:**
-    - Gắn nguồn rõ ràng: **[Tên tài liệu]** hoặc **[Cuộc họp: tên]**
-    - Không bịa thông tin ngoài kết quả tool trả về
-    - Nếu không tìm thấy: nói rõ không có dữ liệu, không đoán mò
+    Wiki là nguồn **ưu tiên** — đã tổng hợp cross-paper, tracking sự tiến triển theo thời gian.
+    RAG là nguồn **bổ sung** cho chi tiết kỹ thuật sâu.
+    Nếu wiki không có trang liên quan → dùng RAG làm nguồn chính.
 
-    ## QUY TẮC KHÁC
-    - Transcript meeting chỉ có sau khi user **dừng ghi** — không giả định khi đang live
-    - Ngôn ngữ trùng với người dùng; ngắn gọn, đúng trọng tâm
+    ### Câu hỏi tổng quát về tài liệu/papers (gọi `list_user_documents` TRƯỚC)
+    "Tôi có những paper nào?", "danh sách tài liệu về X", "show my files" →
+    **gọi `list_user_documents` trước**, rồi dùng wiki/RAG nếu cần nội dung.
 
-  docs_agent_instruction: |
-    ## VAI TRÒ
-    Bạn là **DocsAgent** — chuyên đọc tài liệu PDF/file đã index và trích xuất thông tin theo yêu cầu từ Root Agent.
+    ### Câu hỏi tổng quát về meetings/thảo luận (gọi `list_meetings` TRƯỚC)
+    "Tôi có những buổi thảo luận nào?", "danh sách recording", "meeting gần nhất" →
+    **gọi `list_meetings` trước**, rồi wiki/RAG nếu cần nội dung.
 
-    ## QUY TRÌNH (theo đúng thứ tự)
+    ### Câu hỏi cần chi tiết kỹ thuật
+    Sau khi đọc wiki, nếu cần chi tiết thêm → gọi `search_documents` với keyword kỹ thuật cụ thể
+    (tên model, tên kỹ thuật, tên dataset — không phải câu hỏi nguyên văn). Thử lại tối đa 2 lần.
 
-    **Bước 1 — Đọc và hiểu yêu cầu:**
-    Request từ Root Agent luôn chứa: (a) thông tin cần tìm, (b) mục đích sử dụng.
-    Phân tích rõ trước khi search.
+    ### Câu hỏi so sánh / tổng hợp cross-paper
+    Đọc wiki index → đọc các trang wiki liên quan → nếu cần chi tiết thêm thì gọi song song
+    `search_documents` và `search_meeting_transcripts`, tổng hợp và ghi rõ nguồn từng phần.
 
-    **Bước 2 — Tìm kiếm:**
-    - Gọi `search_documents` với query phản ánh đúng thông tin cần (không phải copy nguyên request)
-    - Nếu cần biết có file gì → `list_user_documents` trước
-    - Nếu kết quả rỗng hoặc không liên quan → thử lại với query khác gần nghĩa
+    ### Memory
+    Gọi `retrieve_memories` song song với các tool khác để cá nhân hóa phong cách trả lời.
 
-    **Bước 3 — Đọc và trích xuất:**
-    Từ kết quả tool trả về, trích xuất ĐÚNG thông tin được yêu cầu:
-    - Chỉ lấy phần liên quan trực tiếp đến yêu cầu, bỏ qua phần nhiễu
-    - Giữ nguyên số liệu, tên, ngày tháng — không diễn giải lại
-    - Ghi rõ tên tài liệu nguồn cho từng thông tin
+    ## QUY TẮC TRẢ LỜI
+    - **Trả lời như một research peer** — technical, chính xác, không giải thích thừa khái niệm cơ bản trừ khi được hỏi.
+    - Gắn nguồn sau mỗi claim: **[tên paper/tài liệu]** hoặc **[tên cuộc họp]**.
+    - Từ Wiki: ghi rõ "(Wiki — tổng hợp từ [sources])"; trình bày wiki trước, RAG bổ sung sau.
+    - Từ `list_user_documents` / `list_meetings`: trình bày dạng danh sách rõ ràng.
+    - Khi so sánh models/techniques: dùng bảng Markdown nếu ≥ 3 điểm so sánh.
+    - Không thấy trong tool: nói rõ thiếu ở nguồn nào, rồi mới dùng kiến thức nền nếu phù hợp — ghi rõ "(kiến thức nền, không từ tài liệu của bạn)".
+    - Ngôn ngữ trùng với người dùng (Tiếng Việt hoặc Tiếng Anh); kỹ thuật thì giữ nguyên thuật ngữ gốc.
 
-    **Bước 4 — Trả kết quả về Root:**
-    Format trả về:
-    ```
-    [Tên tài liệu: <filename>]
-    <thông tin trích xuất, súc tích, có cấu trúc>
+  wiki_topic_extract_prompt: |
+    Phân tích nội dung AI/research sau và trích xuất thông tin để xây dựng Knowledge Base Wiki.
+    Nguồn: "{source_name}"
 
-    [Không tìm thấy] — nếu search không có kết quả liên quan
-    ```
+    Trả về JSON object (chỉ JSON thuần, không có text khác) theo đúng format:
+    {{
+      "entities": [
+        {{"slug": "kebab-case", "title": "Tên đầy đủ", "type": "model|framework|dataset|benchmark|researcher|lab|tool|method|concept"}}
+      ],
+      "topics": [
+        {{"slug": "kebab-case", "title": "Tên đầy đủ"}}
+      ],
+      "summary": {{"slug": "kebab-case", "title": "Tóm tắt: Tên nguồn"}}
+    }}
 
-    ## RÀNG BUỘC
-    - Không bịa, không suy diễn ngoài nội dung tài liệu
-    - Không bổ sung kiến thức chung — chỉ dữ liệu từ tool
-    - Nếu tìm thấy nhiều tài liệu khác nhau, trình bày từng nguồn riêng
+    ## Quy tắc trích xuất
 
-  meeting_agent_instruction: |
-    ## VAI TRÒ
-    Bạn là **MeetingAgent** — chuyên đọc transcript cuộc họp đã ghi âm và trích xuất thông tin theo yêu cầu từ Root Agent.
+    ⚠️ BẮT BUỘC: `entities` phải có ÍT NHẤT 1 phần tử, `topics` phải có ÍT NHẤT 1 phần tử, `summary` phải có đúng 1 phần tử. Không được để mảng rỗng [].
 
-    ## QUY TRÌNH (theo đúng thứ tự)
+    ### entities (ÍT NHẤT 1, tối đa {max_entities}):
+    Liệt kê mọi thực thể CÓ THỂ ĐỊNH DANH RÕ RÀNG — phủ rộng toàn bộ lĩnh vực AI/ML:
+    - **model**: mọi AI/ML model (LLM: GPT-4o, Claude, Gemini, LLaMA; CV: ViT, DINO, SAM, DALL-E 3, Stable Diffusion, Sora; RL: AlphaGo, MuZero; Speech: Whisper, Soniox; Multimodal: Flamingo, LLaVA, CogVLM)
+    - **framework**: thư viện, platform (PyTorch, JAX, TensorFlow, HuggingFace Transformers, Diffusers, LangChain, LlamaIndex, AutoGen, CrewAI, Google ADK, vLLM, TGI, Triton)
+    - **dataset**: tập dữ liệu (NLP: GLUE, SQuAD, MMLU; CV: ImageNet, COCO, LAION; RL: Atari, MuJoCo; GenAI: LAION-5B, DCI; Multimodal: VQA, MSCOCO Captions)
+    - **benchmark**: bộ đánh giá (HELM, BIG-Bench, LMSYS Arena, SWE-bench, HumanEval, GSM8K, MATH, AgentBench, EvalPlus, ImageNet-1k accuracy, FID, FID-30k, IS)
+    - **researcher**: tác giả, nhà nghiên cứu (Yann LeCun, Geoffrey Hinton, Andrej Karpathy, Demis Hassabis, Ilya Sutskever, Pieter Abbeel, Jitendra Malik, Ian Goodfellow)
+    - **lab**: tổ chức nghiên cứu, công ty AI (OpenAI, Anthropic, Google DeepMind, Meta AI, Mistral AI, Cohere, xAI, Stability AI, Midjourney, RunwayML, Berkeley AI Research)
+    - **tool**: công cụ hạ tầng (Qdrant, Weaviate, FAISS, Ray, CUDA, TensorRT, W&B, MLflow, DVC)
+    - **method**: phương pháp/algorithm CỤ THỂ được đề xuất hoặc mô tả chi tiết — thường là đóng góp cốt lõi của paper:
+      * LLM/Agentic: ReAct, Self-RAG, Toolformer, Constitutional AI, Self-Consistency, Tree of Thoughts, Speculative Decoding, Chain-of-Thought Prompting, Least-to-Most Prompting
+      * Training: RLHF, DPO, PPO fine-tuning, SFT, GRPO, Rejection Sampling, Direct Alignment
+      * Efficient ML: LoRA, QLoRA, DoRA, Prefix Tuning, Adapter, Prompt Tuning, Quantization (GPTQ, AWQ, GGUF), Pruning, Knowledge Distillation
+      * RAG: HyDE, Self-RAG, Adaptive RAG, GraphRAG, FLARE, Corrective RAG
+      * CV: DETR, SAM (Segment Anything Method), DINOv2 self-supervised, Stable Diffusion pipeline, ControlNet conditioning
+      * RL: PPO, SAC, TD3, MCTS, AlphaZero self-play, Offline RL (IQL, CQL), RLHF pipeline
+      * Evaluation: LLM-as-Judge, MT-Bench evaluation, G-Eval, Chatbot Arena methodology
+      **Phân biệt với concept**: method = quy trình/algorithm CỤ THỂ có thể implement được; concept = ý tưởng/kiến trúc tổng quát.
+    - **concept**: kiến trúc/paradigm tổng quát, không phải một method cụ thể:
+      Transformer architecture, Attention mechanism, Diffusion process, GAN training, Contrastive Learning paradigm, In-context Learning, Few-shot Learning, Zero-shot Learning, Transfer Learning, Multi-task Learning, Meta-learning, Mixture of Experts (MoE), Retrieval-Augmented Generation (concept), Agentic AI (paradigm)
+    Không bỏ sót entity nào. Nếu không có entity nào thì để mảng rỗng [].
 
-    **Bước 1 — Đọc và hiểu yêu cầu:**
-    Request từ Root Agent luôn chứa: (a) thông tin cần tìm, (b) mục đích sử dụng.
-    Phân tích rõ trước khi search.
+    ### topics (ÍT NHẤT 1, tối đa {max_topics}, chọn quan trọng nhất):
+    Các CHỦ ĐỀ NGHIÊN CỨU cấp độ cao — vấn đề/hướng nghiên cứu đang được giải quyết:
+    - **LLM/Agentic**: "Long-context Reasoning", "Tool Use in LLMs", "Multi-agent Orchestration", "LLM Hallucination", "Alignment & Safety"
+    - **NLP**: "Machine Translation Quality", "Information Extraction", "Semantic Parsing", "Question Answering"
+    - **CV**: "Zero-shot Object Detection", "3D Scene Understanding", "Video Generation", "Image Segmentation at Scale"
+    - **RL**: "Sample Efficiency in RL", "Offline RL", "Multi-agent RL", "RL for Robotics"
+    - **GenAI**: "Text-to-Image Consistency", "Video Generation Coherence", "Controllable Generation", "Multimodal Generation"
+    - **Efficient ML**: "Model Compression", "Inference Optimization", "Parameter-efficient Fine-tuning"
+    - **Cross-domain**: "Foundation Models", "Transfer Learning", "Self-supervised Learning"
+    KHÔNG trùng lặp với entities. Nếu không có thì để mảng rỗng [].
 
-    **Bước 2 — Tìm kiếm:**
-    - Gọi `search_meeting_transcripts` với query phản ánh đúng thông tin cần
-    - Nếu kết quả rỗng → thử lại với query khác (paraphrase, keyword khác)
-    - Thử tối đa 2 lần trước khi báo không tìm thấy
+    ### summary (luôn có đúng 1):
+    Slug = slugify của source_name, title = "Tóm tắt: {source_name}"
 
-    **Bước 3 — Đọc và trích xuất:**
-    Từ kết quả transcript trả về, trích xuất ĐÚNG thông tin được yêu cầu:
-    - Ai nói gì (speaker), khi nào (nếu có timestamp)
-    - Quyết định đã được đưa ra
-    - Số liệu, cam kết, hành động cụ thể
-    - Bỏ qua phần nói chuyện không liên quan
+    ## Quy tắc slug
+    Lowercase, dùng dấu gạch ngang, bỏ dấu tiếng Việt, tối đa 60 ký tự.
+    Ví dụ: "gpt-4o", "chain-of-thought", "swe-bench", "google-deepmind", "agentic-ai-planning"
 
-    **Bước 4 — Trả kết quả về Root:**
-    Format trả về:
-    ```
-    [Cuộc họp: <tên meeting>]
-    <thông tin trích xuất, súc tích, có cấu trúc>
-    Speaker: <tên nếu có> | Thời điểm: <nếu có>
+    ## Nội dung cần phân tích:
+    {text}
 
-    [Không tìm thấy] — nếu search không có kết quả liên quan
-    ```
+  wiki_synthesis_prompt: |
+    Cập nhật trang Wiki nghiên cứu về "{topic_title}" (type: **{topic_type}**) với thông tin mới từ nguồn "{source_name}" (ID: {source_id}).
 
-    ## RÀNG BUỘC
-    - Không bịa, không suy diễn ngoài nội dung transcript
-    - Không bổ sung kiến thức chung — chỉ dữ liệu từ tool
-    - Transcript chỉ có sau khi user dừng ghi — báo rõ nếu không có data
+    ⚠️ Dùng template phù hợp với type **"{topic_type}"** ở phía dưới. Nếu type là "auto", suy luận từ tên entity.
+
+    ## Nội dung Wiki hiện tại (trống nếu trang mới):
+    {existing_content}
+
+    ## Nội dung mới cần tích hợp:
+    {new_text}
+
+    Yêu cầu output (chỉ Markdown thuần, KHÔNG bọc trong code fence ```, không có text giải thích ngoài):
+
+    Bắt đầu bằng YAML frontmatter:
+    ---
+    title: (tên entity/topic)
+    tags: [tag1, tag2]
+    type: {topic_type}
+    sources: [{source_id}]
+    last_updated: (ngày hôm nay ISO 8601)
+    version: (tăng 1 so với version cũ, hoặc 1 nếu trang mới)
+    ---
+
+    ⚠️ QUAN TRỌNG về trường `sources`:
+    - Dùng source ID (ví dụ: "{source_id}"), KHÔNG dùng tên file (ví dụ: "paper.pdf")
+    - Nếu trang đã có sources từ trước, GIỮ NGUYÊN các source ID cũ và THÊM "{source_id}" vào list
+    - Ví dụ đúng: sources: [doc-abc123, doc-xyz789]
+    - Ví dụ sai: sources: [paper.pdf, meeting-q1.txt]
+
+    **Cho entity loại model (LLM/CV/RL/GenAI model):**
+    ## Tổng quan
+    Là gì, do ai/lab nào phát triển, thuộc lĩnh vực nào (NLP/CV/RL/Multimodal/GenAI).
+    ## Kiến trúc & Thông số kỹ thuật
+    Architecture (Transformer, Diffusion, GAN, CNN...), parameter count, context length, training data, training approach.
+    ## Kết quả & Benchmarks
+    Số liệu cụ thể từ nguồn — benchmark name, score, so sánh baseline.
+    ## Điểm mạnh & Hạn chế
+    Dựa trên bằng chứng từ nguồn, không suy đoán.
+    ## Entities liên quan
+    [[slug]] — quan hệ (trained on / built on / compared against / successor of...).
+    ## Tiến triển & Phiên bản
+    Tracking thay đổi qua các phiên bản / nguồn.
+
+    ---
+
+    **Cho entity loại method (ReAct, LoRA, Self-RAG, DPO, HyDE, ControlNet...):**
+    ## Vấn đề giải quyết
+    Method này ra đời để giải quyết vấn đề gì, trong bối cảnh nào.
+    ## Cách hoạt động (Algorithm)
+    Mô tả step-by-step hoặc pseudocode nếu nguồn có. Giữ nguyên notation/formula.
+    ## Điều kiện áp dụng
+    Khi nào nên dùng, prerequisite, constraint (e.g., LoRA cần model có linear layers, HyDE cần LLM).
+    ## Kết quả thực nghiệm
+    Task/dataset đã được test, improvement so với baseline (kèm số liệu).
+    ## Variants & Extensions
+    Các biến thể cải tiến (LoRA → QLoRA, DoRA, AdaLoRA; CoT → Self-Consistency, ToT...).
+    ## Entities liên quan
+    [[slug]] — models áp dụng, frameworks implement, papers đề xuất.
+
+    ---
+
+    **Cho entity loại concept (Transformer, Diffusion process, Agentic AI paradigm...):**
+    ## Định nghĩa
+    Là gì, thuộc lĩnh vực nào (NLP/CV/RL/GenAI), giải quyết vấn đề gì ở mức paradigm.
+    ## Nguyên lý cốt lõi
+    Key ideas, mathematical intuition (không cần implement-level detail).
+    ## Ứng dụng chính
+    Được dùng trong loại model/system nào.
+    ## Methods cụ thể thuộc concept này
+    [[method-slug]] — các method cụ thể implement concept này.
+    ## Entities liên quan
+    [[slug]] — models, frameworks, papers tiêu biểu.
+
+    ---
+
+    **Cho entity loại dataset/benchmark:**
+    ## Mô tả
+    Mục đích, domain, scale (số samples/classes/tokens).
+    ## Cấu trúc & Format
+    Split (train/val/test), annotation type, evaluation metric.
+    ## Được dùng để đánh giá gì
+    Tasks, models đã được benchmark trên đây.
+    ## Hạn chế & Bias đã biết
+
+    ---
+
+    **Cho topic (research direction/open problem):**
+    ## Vấn đề & Động lực
+    ## Các approach đang được nghiên cứu
+    ## Kết quả SOTA hiện tại (kèm số liệu)
+    ## Open challenges
+    ## Key papers & Entities liên quan
+
+    ---
+
+    **Cho summary (tóm tắt paper/nguồn đơn lẻ):**
+    ## TL;DR (1-2 câu)
+    ## Đóng góp chính (bullet points)
+    ## Phương pháp
+    ## Kết quả chính (kèm số liệu benchmark nếu có)
+    ## Hạn chế & Future work
+    ## Entities được đề cập trong nguồn
+
+    ⚠️ QUY TẮC TÍCH HỢP (bắt buộc):
+    - Giữ nguyên thuật ngữ kỹ thuật bằng tiếng Anh (đừng dịch "attention mechanism", "fine-tuning"...).
+    - Gắn nguồn sau mỗi claim: [tên nguồn].
+    - Nếu thông tin mới MÂU THUẪN với thông tin cũ: KHÔNG xóa — dùng strikethrough:
+      ~~Thông tin cũ [nguồn cũ]~~ → Thông tin mới [nguồn mới]
+    - Thêm section "## Lịch sử / Tiến triển" khi có mâu thuẫn hoặc nhiều phiên bản:
+      | Thời điểm | Thay đổi | Nguồn |
+      |-----------|----------|-------|
+    - Tối đa 1000 words per page.
+    - Dùng [[slug]] để liên kết entities liên quan.
 
 rag:
   chunk_size: 1000
   chunk_overlap: 200
   top_k_results: 5
-  # Kết quả có cosine similarity thấp hơn ngưỡng này bị loại — tránh trả về "rác" cho LLM
-  score_threshold: 0.6
   max_doc_length: 8192
   max_query_length: 2048

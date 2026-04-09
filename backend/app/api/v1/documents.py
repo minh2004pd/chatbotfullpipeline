@@ -1,8 +1,10 @@
 """Document endpoints: upload PDF, list, delete."""
 
+import asyncio
+
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
-from app.core.dependencies import DocumentServiceDep, SettingsDep, UserIDDep
+from app.core.dependencies import DocumentServiceDep, SettingsDep, UserIDDep, WikiServiceDep
 from app.schemas.document import (
     DocumentDeleteResponse,
     DocumentListResponse,
@@ -22,6 +24,7 @@ async def upload_document(
     user_id: UserIDDep = None,
     service: DocumentServiceDep = None,
     settings: SettingsDep = None,
+    wiki_service: WikiServiceDep = None,
 ) -> DocumentUploadResponse:
     """Upload PDF để ingest vào RAG."""
     if not file.filename or not file.filename.lower().endswith(".pdf"):
@@ -37,7 +40,21 @@ async def upload_document(
             detail=f"File quá lớn. Tối đa {settings.max_upload_size_mb}MB.",
         )
 
-    return service.upload_pdf(file_bytes=file_bytes, filename=file.filename, user_id=user_id)
+    result = service.upload_pdf(file_bytes=file_bytes, filename=file.filename, user_id=user_id)
+
+    # Fire-and-forget: tổng hợp wiki từ tài liệu vừa upload (background, không block response)
+    if settings.wiki_enabled:
+        full_text = service.rag.extract_text(file_bytes)
+        asyncio.create_task(
+            wiki_service.update_wiki_from_document(
+                user_id=user_id,
+                document_id=result.document_id,
+                filename=file.filename,
+                full_text=full_text[: settings.wiki_max_text_chars],
+            )
+        )
+
+    return result
 
 
 @router.get("", response_model=DocumentListResponse)
@@ -55,7 +72,19 @@ async def delete_document(
     document_id: str,
     user_id: UserIDDep,
     service: DocumentServiceDep,
+    settings: SettingsDep,
+    wiki_service: WikiServiceDep,
 ) -> DocumentDeleteResponse:
     """Xóa tài liệu và tất cả chunks trong Qdrant."""
     service.delete_document(document_id=document_id)
+
+    # Fire-and-forget: dọn dẹp wiki pages liên quan đến tài liệu bị xóa
+    if settings.wiki_enabled:
+        asyncio.create_task(
+            wiki_service.remove_source_from_wiki(
+                user_id=user_id,
+                source_id=document_id,
+            )
+        )
+
     return DocumentDeleteResponse(document_id=document_id)

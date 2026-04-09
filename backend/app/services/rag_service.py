@@ -79,6 +79,10 @@ class RAGService:
     def count_chunks(self, document_id: str) -> int:
         return self.repo.count_chunks(document_id=document_id)
 
+    def extract_text(self, file_bytes: bytes) -> str:
+        """Trích xuất text thuần từ PDF bytes (không ingest vào Qdrant)."""
+        return extract_pdf_text(file_bytes)
+
 
 # ── Helpers ──────────────────────────────────────────────────
 

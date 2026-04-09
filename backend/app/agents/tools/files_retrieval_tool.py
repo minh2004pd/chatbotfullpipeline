@@ -11,22 +11,18 @@ logger = structlog.get_logger(__name__)
 
 def list_user_documents(tool_context: ToolContext) -> dict:
     """
-    Truy xuất danh sách tất cả các tài liệu (PDF) mà người dùng hiện tại đã tải lên và lưu trữ trong hệ thống.
+    Liệt kê tất cả tài liệu (PDF, file) mà người dùng đã upload vào hệ thống.
 
-    HƯỚNG DẪN SỬ DỤNG CHO AI:
-    - Đây là công cụ ưu tiên để xác định phạm vi kiến thức.
-    - Hãy gọi công cụ này khi người dùng hỏi về danh sách file, hoặc khi bạn cần 'document_id' chính xác để phục vụ việc tìm kiếm chuyên sâu trong một file cụ thể.
-    - Nếu người dùng hỏi về một chủ đề mà bạn không chắc nằm ở file nào, hãy chạy lệnh này để xem danh sách tên file gợi ý.
+    Dùng khi: người dùng hỏi "tôi có những file gì?", "danh sách tài liệu", hoặc khi
+    search_documents trả về rỗng và cần xác định xem dữ liệu có tồn tại không.
+    Không dùng để tìm nội dung bên trong tài liệu — hãy dùng search_documents cho việc đó.
 
     Args:
-        tool_context (ToolContext): Đối tượng ngữ cảnh của hệ thống, chứa thông tin định danh người dùng (user_id) và trạng thái phiên làm việc.
+        tool_context: ADK tool context chứa session state.
 
     Returns:
-        dict: Một dictionary chứa kết quả:
-            - 'found' (bool): True nếu có tài liệu, False nếu thư viện trống.
-            - 'documents' (list): Danh sách các object gồm 'document_id' (ID duy nhất) và 'filename' (tên file gốc).
-            - 'count' (int): Tổng số lượng tài liệu tìm thấy.
-            - 'message' (str): Thông báo trạng thái hoặc hướng dẫn cho người dùng.
+        Dict với danh sách filename và document_id của từng tài liệu đã upload.
+        Trả về found=False nếu chưa có tài liệu nào.
     """
     user_id = tool_context.state.get("user_id", "default_user")
 

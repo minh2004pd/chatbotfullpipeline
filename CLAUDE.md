@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MemRAG Chatbot — multimodal AI chatbot với RAG (PDF), long-term memory, và **realtime transcription** (Soniox). Stack: Google ADK + Gemini + mem0 + Qdrant + FastAPI + Soniox.
+**MemRAG Research Assistant** — AI research assistant chuyên sâu, tập trung vào NLP, LLMs, Agentic AI, Computer Vision, RL, Generative AI. Stack: Google ADK + Gemini + mem0 + Qdrant + FastAPI + Soniox.
+
+Core capability: tổng hợp knowledge từ papers + meeting transcripts thành wiki có cấu trúc; agent trả lời câu hỏi research với nguồn rõ ràng.
 
 ## Commands
 
@@ -56,13 +58,13 @@ HTTP Request → FastAPI Router (api/v1/) → Service Layer → Repository / ADK
 
 ### Key Design Decisions
 
-**Multi-Agent Architecture** (`agents/`): 3-tier agent system dùng Google ADK `AgentTool`. Root Agent (gemini-2.5-flash) orchestrate, formulate specific requests và delegate sang DocsAgent + MeetingAgent (gemini-2.0-flash) chạy song song. Sub-agents dùng `InMemorySessionService` (ephemeral per-invocation), nhận parent session state qua copy, propagate state delta ngược về parent. **`skip_summarization=True` bắt buộc** trên mỗi AgentTool — nếu False, ADK summarize mất chi tiết trước khi trả Root. Xem `docs/multi-agent-architecture.md` để hiểu đầy đủ. Để debug dùng `/adk-debug`.
+**Multi-Agent Architecture** (`agents/`): Root Agent (gemini-2.5-flash) với 9 tools: `search_documents`, `search_meeting_transcripts`, `list_user_documents`, `list_meetings`, `retrieve_memories`, `store_memory`, `read_wiki_index`, `read_wiki_page`, `list_wiki_pages`. Agent có thể gọi `list_meetings` / `list_user_documents` trước khi search để lấy danh sách, hoặc gọi song song các search tools khi hỏi lồng cả meeting + document. Xem `docs/multi-agent-architecture.md` để hiểu đầy đủ về orchestration. Để debug dùng `/adk-debug`.
 
 **ADK Runner** (`core/dependencies.py`): `get_runner()` dùng `lru_cache` — singleton per process. Runner nhận `app_name="memrag"` và `DynamoDBSessionService`. Sessions tạo per `(user_id, session_id)` qua `_ensure_session()` trước mỗi `runner.run_async()`. `get_runner()` định nghĩa trong `core/dependencies.py` (không trong `root_agent.py`) để tránh circular imports.
 
 **Streaming** (`services/chat_service.py`): `chat_stream` pass `RunConfig(streaming_mode=StreamingMode.SSE)` vào `runner.run_async()`. Yield trên `event.partial` (không phải `event.is_final_response()`) để lấy incremental chunks.
 
-**Tools vs Services**: ADK tools (`search_documents`, `search_meeting_transcripts`, `retrieve_memories`, `store_memory`, `list_user_documents`) được gọi bởi agents trong inference. `RAGService` và `MemoryService` được gọi trực tiếp bởi HTTP endpoints (upload, list, delete). Cả hai path share cùng repositories.
+**Tools vs Services**: ADK tools (`search_documents`, `search_meeting_transcripts`, `list_user_documents`, `list_meetings`, `retrieve_memories`, `store_memory`) được gọi bởi agents trong inference. `RAGService`, `MemoryService`, và `MeetingRepository` được gọi trực tiếp bởi HTTP endpoints (upload, list, delete). Cả hai path share cùng repositories.
 
 **ContextFilterPlugin** (`agents/plugins/context_filter_plugin.py`): `before_model_callback` trên Root Agent (không ảnh hưởng sub-agents). Mọi `n > max_context_messages` đều đi qua summarization — không còn truncation path:
 - **Lần đầu** (chưa có summary): blocking, chờ Gemini tóm tắt
@@ -84,7 +86,19 @@ HTTP Request → FastAPI Router (api/v1/) → Service Layer → Repository / ADK
 
 **Soniox Transcription** (`services/soniox_service.py`): Module-level `_sessions` dict (singleton per process) quản lý active WebSocket connections tới Soniox API. Flow: `POST /transcription/start` → mở WS + background receiver task + tạo meeting record → `POST /transcription/audio/{id}` (binary PCM16 chunks) → `GET /transcription/stream/{id}` (SSE) → `POST /transcription/stop/{id}` lưu utterances vào DynamoDB + ingest Qdrant. Dùng `websockets.asyncio.client` (v14+ API). ADK tool `search_meeting_transcripts` cho phép agent search trong transcript.
 
-**Meeting Storage**: DynamoDB table `memrag-meetings` (single-table design) — `PK=USER#{user_id}, SK=MEETING#{id}` cho metadata; `PK=MEETING#{id}, SK=UTTERANCE#{ts}#{seq}` cho utterances. Qdrant collection `meetings` lưu chunked transcript embeddings (time-window 60s hoặc max 300 words/chunk). `ensure_meetings_table()` tạo table tự động khi startup.
+**Meeting Storage**: DynamoDB table `memrag-meetings` (single-table design) — `PK=USER#{user_id}, SK=MEETING#{id}` cho metadata; `PK=MEETING#{id}, SK=UTTERANCE#{ts}#{seq}` cho utterances. Qdrant collection `meetings` lưu chunked transcript embeddings (time-window 60s hoặc max 300 words/chunk). `ensure_meetings_table()` tạo table tự động khi startup. ADK tool `list_meetings` cho phép agent liệt kê tất cả meeting của user (dùng khi hỏi chung chung như "tôi có những cuộc họp nào?"); `search_meeting_transcripts` để tìm nội dung cụ thể bên trong.
+
+**Wiki Layer** (`repositories/wiki_repo.py`, `services/wiki_service.py`, `agents/tools/wiki_tools.py`): AI tự động tổng hợp Markdown knowledge pages sau mỗi ingestion event (PDF upload / transcript stop). Chạy background — không block response.
+- Storage: file-based Markdown, dual backend — local filesystem (dev) hoặc S3 (production ECS). `WikiRepository` tự detect qua `settings.storage_backend`.
+- Cấu trúc: `wiki/{user_id}/pages/{entities|topics|summaries}/`, `raw/`, `index.md`, `log.md`, `CLAUDE.md` (schema).
+- Entity taxonomy: `model`, `framework`, `dataset`, `benchmark`, `researcher`, `lab`, `tool`, `method`, `concept` — phân biệt `method` (algorithm cụ thể có thể implement) vs `concept` (paradigm tổng quát).
+- Pipeline: `_extract_topics()` (LLM → JSON `{entities, topics, summary}`) → synthesize pages → `_rebuild_index()` (rule-based, không LLM) → `append_log()`.
+- Limits: `wiki_max_entities_per_source=10`, `wiki_max_topics_per_source=3`, luôn 1 summary per source.
+- Race condition guard: `asyncio.Lock` per `"{user_id}:{rel_path}"` trong module-level `_page_locks` dict.
+- ADK tools chỉ READ: `read_wiki_index` → `read_wiki_page` → fallback RAG. Agent luôn gọi wiki trước.
+- Deletion cascade: `remove_source_from_wiki()` — 1 source → xóa page; multi-source → LLM re-synthesize.
+- ⚠️ `Part.from_text()` trong google-genai mới là keyword-only: dùng `Part.from_text(text=...)`.
+- Config: `WIKI_ENABLED`, `WIKI_BASE_DIR`, `WIKI_MAX_TEXT_CHARS`, `WIKI_MAX_ENTITIES_PER_SOURCE`, `WIKI_MAX_TOPICS_PER_SOURCE`.
 
 **Frontend Audio Capture** (`services/AudioCaptureService.ts`): Dùng AudioWorklet (inline blob) resample → 16kHz PCM16. Hỗ trợ 3 nguồn: `mic` (getUserMedia), `system` (getDisplayMedia), `both` (AudioContext merge). Chunks gửi tới backend qua `POST /api/v1/transcription/audio/{id}`. `TranscriptionPanel` toggle bằng Mic icon ở header.
 
@@ -96,7 +110,7 @@ HTTP Request → FastAPI Router (api/v1/) → Service Layer → Repository / ADK
 - `DYNAMODB_ENDPOINT_URL=http://dynamodb-local:8000` được set trong docker-compose `environment` block (local). Để trống = real AWS DynamoDB.
 - **CloudFront reverse proxy**: Production CloudFront distribution routes `/api/*` → EC2 backend (HTTP :8000) and `/*` → S3 frontend. FE is built with `VITE_API_BASE_URL=""` so axios uses relative URLs — same-origin, no CORS needed. `compress=false` on the `/api/*` behavior prevents buffering SSE streams at the edge.
 - **Context summarization config** (tunable via `.env`): `SUMMARY_THRESHOLD=22`, `SUMMARY_KEEP_RECENT=10`, `MAX_CONTEXT_MESSAGES=20`. `SCORE_THRESHOLD=0.6` loại RAG results thấp. `MEMORY_SEARCH_LIMIT=15` search rộng rồi rerank top-7.
-- **Model config** (`core/llm_config.yaml`): `model` (Root), `retrieval_model` (sub-agents), `summary_model`. ⚠️ `gemini-2.0-flash-lite` đã deprecated — dùng `gemini-2.0-flash`.
+- **Model config** (`core/llm_config.yaml`): `model` (Root agent), `temperature/top_p/top_k/max_output_tokens`, `system_instruction` (chi tiết chiến lược gọi tools, trigger patterns). ⚠️ `gemini-2.0-flash-lite` đã deprecated — dùng `gemini-2.0-flash`.
 - **Soniox config** (local `.env`): `SONIOX_API_KEY=xxx`, `SONIOX_MODEL=stt-rt-preview` (default), `SONIOX_TARGET_LANG=vi` (default). Không cần thay đổi docker-compose — Soniox là external API.
 
 ### Dependency Injection
@@ -146,6 +160,9 @@ Use **Conventional Commits**: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `
 | Skill | Dùng khi |
 |-------|----------|
 | `/adk-debug` | Debug ADK agents, tools, session state, multi-agent issues |
+| `/adk-wiki-trace` | Trace khi agent không gọi wiki tools đúng (system_instruction, tool registration, replay) |
+| `/wiki-debug` | Inspect wiki state: list pages, đọc index.md, xem log entries cuối |
+| `/research-add` | Flow chuẩn upload paper mới → verify wiki ingest |
 | `/lint-fix` | Auto-fix ruff format + lint trước khi commit |
 | `/verify` | Chạy full test suite với coverage |
 | `/verify-fe` | TypeScript + ESLint + Vite build cho frontend |

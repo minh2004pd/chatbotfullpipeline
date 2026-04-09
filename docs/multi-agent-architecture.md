@@ -9,6 +9,7 @@ Root Agent  (gemini-2.5-flash)
   ├── search_documents          — tìm trong tài liệu PDF/file (Qdrant)
   ├── search_meeting_transcripts— tìm trong transcript cuộc họp (Qdrant)
   ├── list_user_documents       — liệt kê file đã upload
+  ├── list_meetings             — liệt kê cuộc họp đã ghi âm
   ├── retrieve_memories         — mem0 long-term memory (search limit=15, top-7)
   └── store_memory              — lưu vào mem0
 ```
@@ -38,7 +39,8 @@ Root Agent (gemini-2.5-flash)
     │
     ├── search_documents(query)           → Qdrant (asyncio.to_thread)
     ├── search_meeting_transcripts(query) → Qdrant (asyncio.to_thread)
-    ├── list_user_documents()             → Qdrant
+    ├── list_user_documents()             → Qdrant (lấy metadata)
+    ├── list_meetings()                   → DynamoDB (lấy danh sách meeting)
     ├── retrieve_memories(query)          → mem0 (limit=15, top-7)
     └── store_memory(content)             → mem0
     ↓
@@ -97,6 +99,25 @@ SUMMARY_KEEP_RECENT=10     # messages gần nhất giữ lại
 
 ---
 
+## Tool Strategy
+
+### list_meetings & list_user_documents (Inventory tools)
+
+Khi người dùng hỏi chung chung (không cụ thể):
+- **"Tôi có những cuộc họp nào?"** → `list_meetings()` trước → tối ưu được trả lời ngay
+- **"Tôi có những file gì?"** → `list_user_documents()` trước → lấy danh sách
+- **"Tóm tắt tất cả meetings"** → `list_meetings()` lấy danh sách → sau đó search transcript nếu cần
+
+Khi người dùng hỏi nội dung cụ thể:
+- **"Ai nói gì trong meeting về X"** → `search_meeting_transcripts()` (không cần list trước)
+- **"Tìm trong báo cáo Q1 về chi phí"** → `search_documents()` (không cần list trước)
+
+Optimization:
+- Inventory tools (list_meetings, list_user_documents) **không đi qua embedding** → nhanh, dùng metadata trực tiếp
+- Search tools (search_documents, search_meeting_transcripts) **qua Qdrant + embedding** → chậm hơn nhưng tìm nội dung cụ thể
+
+---
+
 ## RAG Retrieval Pipeline
 
 ### search_documents
@@ -115,16 +136,60 @@ async def search_documents(query, tool_context):
 
 ### search_meeting_transcripts
 
-Cùng pattern, search trong collection `meetings` thay vì `rag_documents`.
+Cùng pattern như `search_documents`, search trong collection `meetings` thay vì `rag_documents`.
+
+### list_meetings
+
+```python
+def list_meetings(tool_context):
+    # Query DynamoDB table memrag-meetings
+    # Partition key: USER#{user_id}
+    # Returns: title, meeting_id, status, created_at, duration_ms, speakers, utterance_count
+    # Sort mới nhất trước (created_at DESC)
+```
+
+**Dùng khi:**
+- "Tôi có những cuộc họp nào?" → Get inventory nhanh từ metadata
+- "Danh sách meetings gần nhất" → Parse created_at từ kết quả
+- "Có bao nhiêu recording?" → Count từ results
+
+Không embedding, không vector search — cực nhanh, chỉ metadata query.
+
+### list_user_documents
+
+```python
+def list_user_documents(tool_context):
+    # Query Qdrant metadata (document collections)
+    # Returns: document_id, filename
+```
+
+**Dùng khi:**
+- "Tôi có những file gì?" → Get danh sách file đã upload
+- Verify khi `search_documents()` trả rỗng → "Bạn có upload file Y không?"
 
 ### retrieve_memories
 
 ```python
 def retrieve_memories(query, tool_context):
-    # Search limit=15 (rộng hơn) → sort by score → top-7
+    # Query mem0 memory store (vector search)
+    # Search limit=15 (rộng hơn để không miss) → sort by score → top-7 (cân bằng giữa quality vs brevity)
     raw = repo.search_memory(query, user_id, limit=15)
     ranked = sorted(raw, key=lambda m: m.get("score", 0), reverse=True)
     return ranked[:7]
+```
+
+**Dùng khi:**
+- "Bạn có nhớ không..." → Cá nhân hóa phong cách
+- Hỏi lại thông tin đã share trước → Kéo context từ mem0
+- Tuy nhiên, **không phải source duy nhất** cho sự kiện cụ thể — kết hợp với search_documents/search_meeting_transcripts
+
+### store_memory
+
+```python
+def store_memory(content, tool_context):
+    # Lưu fact mới vào mem0
+    # Agent gọi tự động khi người dùng share thông tin cá nhân có giá trị
+    repo.add_memory(messages=[{"role": "user", "content": content}], user_id=user_id)
 ```
 
 ---
@@ -159,13 +224,11 @@ attempt=3 → delay ~4.x s (capped at 10s)
 ```
 backend/app/agents/
   root_agent.py          Root Agent definition + tools wiring
-  docs_agent.py          (không dùng — giữ lại cho tham khảo)
-  meeting_agent.py       (không dùng — giữ lại cho tham khảo)
   plugins/
     context_filter_plugin.py  Context summarization callback
   tools/
     qdrant_search_tool.py     search_documents tool
-    meeting_search_tool.py    search_meeting_transcripts tool
+    meeting_search_tool.py    search_meeting_transcripts, list_meetings tools
     mem0_tools.py             retrieve_memories, store_memory
     files_retrieval_tool.py   list_user_documents
 

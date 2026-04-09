@@ -86,9 +86,9 @@ resource "aws_iam_user_policy" "github_actions" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid      = "ECRAuth"
-        Effect   = "Allow"
-        Action   = ["ecr:GetAuthorizationToken"]
+        Sid    = "ECRAuth"
+        Effect = "Allow"
+        Action = ["ecr:GetAuthorizationToken"]
         Resource = ["*"]
       },
       {

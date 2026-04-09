@@ -98,9 +98,9 @@ variable "gemini_model" {
 }
 
 variable "qdrant_url" {
-  description = "URL của Qdrant server (Cloud Map DNS sau khi tách service)"
+  description = "URL của Qdrant server"
   type        = string
-  default     = "http://qdrant.memrag.local:6333"
+  default     = "http://localhost:6333"
 }
 
 variable "allowed_origins" {
@@ -172,48 +172,4 @@ variable "soniox_ws_url" {
   description = "Soniox websocket URL"
   type        = string
   default     = "wss://stt-rt.soniox.com/transcribe-websocket"
-}
-
-# ── VPC ─────────────────────────────────────────────────────────────────────
-variable "vpc_cidr" {
-  description = "CIDR block cho VPC mới"
-  type        = string
-  default     = "10.0.0.0/16"
-}
-
-variable "availability_zones" {
-  description = "Danh sách AZ (ít nhất 2 AZ cho ALB)"
-  type        = list(string)
-  default     = ["ap-southeast-2a", "ap-southeast-2b"]
-}
-
-variable "public_subnet_cidrs" {
-  description = "CIDR cho public subnets (ALB)"
-  type        = list(string)
-  default     = ["10.0.1.0/24", "10.0.2.0/24"]
-}
-
-variable "private_subnet_cidrs" {
-  description = "CIDR cho private subnets (backend + qdrant)"
-  type        = list(string)
-  default     = ["10.0.10.0/24", "10.0.11.0/24"]
-}
-
-# ── Auto Scaling ─────────────────────────────────────────────────────────────
-variable "backend_min_count" {
-  description = "Số lượng backend task tối thiểu"
-  type        = number
-  default     = 1
-}
-
-variable "backend_max_count" {
-  description = "Số lượng backend task tối đa"
-  type        = number
-  default     = 4
-}
-
-variable "cpu_scaling_target" {
-  description = "CPU utilization % để trigger scale out"
-  type        = number
-  default     = 60
 }

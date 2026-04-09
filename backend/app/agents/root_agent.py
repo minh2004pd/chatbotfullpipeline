@@ -5,6 +5,10 @@ Agent dùng gemini-2.5-flash để reasoning + tự gọi tools:
   - search_documents          : tìm trong tài liệu PDF/file
   - search_meeting_transcripts: tìm trong transcript cuộc họp
   - list_user_documents       : liệt kê file đã upload
+  - list_meetings             : liệt kê danh sách cuộc họp đã ghi âm
+  - read_wiki_index           : xem bản đồ tri thức wiki (index.md)
+  - read_wiki_page            : đọc nội dung trang wiki cụ thể
+  - list_wiki_pages           : liệt kê pages trong category wiki
   - retrieve_memories         : lấy long-term memory
   - store_memory              : lưu long-term memory
 """
@@ -19,9 +23,10 @@ from app.agents.plugins.context_filter_plugin import (
     context_filter_before_model,
 )
 from app.agents.tools.files_retrieval_tool import list_user_documents
-from app.agents.tools.meeting_search_tool import search_meeting_transcripts
+from app.agents.tools.meeting_search_tool import list_meetings, search_meeting_transcripts
 from app.agents.tools.mem0_tools import retrieve_memories, store_memory
 from app.agents.tools.qdrant_search_tool import search_documents
+from app.agents.tools.wiki_tools import list_wiki_pages, read_wiki_index, read_wiki_page
 from app.core.llm_config import get_llm_config
 
 
@@ -37,6 +42,10 @@ def get_root_agent() -> LlmAgent:
             search_documents,
             search_meeting_transcripts,
             list_user_documents,
+            list_meetings,
+            read_wiki_index,
+            read_wiki_page,
+            list_wiki_pages,
             retrieve_memories,
             store_memory,
         ],

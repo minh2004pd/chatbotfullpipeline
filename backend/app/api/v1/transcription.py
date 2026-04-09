@@ -10,6 +10,7 @@ Endpoints:
   DELETE /meetings/{meeting_id}          → xóa meeting
 """
 
+import asyncio
 import json
 from datetime import datetime, timezone
 
@@ -54,6 +55,14 @@ def _get_transcript_rag() -> TranscriptRAGService:
     from app.core.database import get_qdrant_client
 
     return TranscriptRAGService(get_qdrant_client())
+
+
+def _get_wiki_service():
+    from app.core.config import get_settings
+    from app.core.dependencies import get_wiki_repo
+    from app.services.wiki_service import WikiService
+
+    return WikiService(repo=get_wiki_repo(), settings=get_settings())
 
 
 # ── Transcription endpoints ───────────────────────────────────────────────────
@@ -169,6 +178,23 @@ async def stop_transcription(meeting_id: str, user_id: UserIDDep):
         except Exception as e:
             logger.warning("transcript_rag_ingest_failed", meeting_id=meeting_id, error=str(e))
 
+    # Fire-and-forget: tổng hợp wiki từ transcript vừa stop (background, không block response)
+    from app.core.config import get_settings as _gs
+
+    if utterances and _gs().wiki_enabled:
+        meeting_meta_for_wiki = repo.get_meeting(meeting_id=meeting_id, user_id=user_id)
+        wiki_title = (
+            meeting_meta_for_wiki.get("title", "Untitled") if meeting_meta_for_wiki else "Untitled"
+        )
+        asyncio.create_task(
+            _get_wiki_service().update_wiki_from_transcript(
+                user_id=user_id,
+                meeting_id=meeting_id,
+                title=wiki_title,
+                utterances=utterances,
+            )
+        )
+
     logger.info("transcription_stopped", meeting_id=meeting_id, utterances=len(utterances))
     return StopTranscriptionResponse(
         meeting_id=meeting_id,
@@ -238,7 +264,7 @@ def get_transcript(meeting_id: str, user_id: UserIDDep):
 
 
 @meetings_router.delete("/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_meeting(meeting_id: str, user_id: UserIDDep):
+async def delete_meeting(meeting_id: str, user_id: UserIDDep):
     """Xóa meeting và transcript khỏi DynamoDB + Qdrant."""
     repo = _get_meeting_repo()
     meta = repo.get_meeting(meeting_id=meeting_id, user_id=user_id)
@@ -253,3 +279,14 @@ def delete_meeting(meeting_id: str, user_id: UserIDDep):
         rag.delete_meeting(meeting_id)
     except Exception as e:
         logger.warning("meeting_qdrant_delete_failed", meeting_id=meeting_id, error=str(e))
+
+    # Fire-and-forget: dọn dẹp wiki pages liên quan đến meeting bị xóa
+    from app.core.config import get_settings as _gs
+
+    if _gs().wiki_enabled:
+        asyncio.create_task(
+            _get_wiki_service().remove_source_from_wiki(
+                user_id=user_id,
+                source_id=meeting_id,
+            )
+        )

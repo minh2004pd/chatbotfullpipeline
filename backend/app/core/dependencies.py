@@ -31,11 +31,13 @@ from app.core.database import get_dynamodb_resource, get_mem0_client, get_qdrant
 from app.core.storages import StorageBackend, get_storage
 from app.repositories.mem0_repo import Mem0Repository
 from app.repositories.qdrant_repo import QdrantRepository
+from app.repositories.wiki_repo import WikiRepository
 from app.services.chat_service import ChatService
 from app.services.document_service import DocumentService
 from app.services.dynamo_session_service import DynamoDBSessionService
 from app.services.memory_service import MemoryService
 from app.services.rag_service import RAGService
+from app.services.wiki_service import WikiService
 
 # --- Auth ---
 
@@ -140,6 +142,37 @@ def get_session_service_dep(
     return service
 
 
+@lru_cache
+def get_wiki_repo() -> WikiRepository:
+    """Singleton WikiRepository — tự chọn local hoặc S3 backend."""
+    settings = get_settings()
+    if settings.storage_backend == "s3":
+        import boto3
+
+        s3_kwargs: dict = {"region_name": settings.s3_region}
+        if settings.s3_endpoint_url:
+            s3_kwargs["endpoint_url"] = settings.s3_endpoint_url
+        if settings.s3_access_key_id:
+            s3_kwargs["aws_access_key_id"] = settings.s3_access_key_id
+            s3_kwargs["aws_secret_access_key"] = settings.s3_secret_access_key
+        if settings.s3_session_token:
+            s3_kwargs["aws_session_token"] = settings.s3_session_token
+        s3_client = boto3.client("s3", **s3_kwargs)
+        return WikiRepository(
+            s3_client=s3_client,
+            s3_bucket=settings.s3_bucket,
+            s3_prefix="wiki",
+        )
+    # Local filesystem
+    return WikiRepository(base_dir=settings.wiki_base_dir)
+
+
+def get_wiki_service(
+    settings: Settings = Depends(get_settings),
+) -> WikiService:
+    return WikiService(repo=get_wiki_repo(), settings=settings)
+
+
 # --- Annotated shorthands (dùng trong endpoint signatures) ---
 
 UserIDDep = Annotated[str, Depends(get_user_id)]
@@ -149,3 +182,4 @@ DocumentServiceDep = Annotated[DocumentService, Depends(get_document_service)]
 ChatServiceDep = Annotated[ChatService, Depends(get_chat_service)]
 SessionServiceDep = Annotated[DynamoDBSessionService, Depends(get_session_service_dep)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
+WikiServiceDep = Annotated[WikiService, Depends(get_wiki_service)]

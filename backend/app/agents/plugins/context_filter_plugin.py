@@ -98,11 +98,11 @@ async def _apply_summarization(
 
         summary_msg = Content(
             role="user",
-            parts=[Part.from_text(f"[Tóm tắt trước đó]\n{existing_summary}")],
+            parts=[Part.from_text(text=f"[Tóm tắt trước đó]\n{existing_summary}")],
         )
         summary_ack = Content(
             role="model",
-            parts=[Part.from_text("Đã hiểu. Tôi sẽ tiếp tục dựa trên tóm tắt.")],
+            parts=[Part.from_text(text="Đã hiểu. Tôi sẽ tiếp tục dựa trên tóm tắt.")],
         )
         llm_request.contents = [summary_msg, summary_ack] + recent
         logger.info("context_with_summary", original=n, after=len(llm_request.contents))

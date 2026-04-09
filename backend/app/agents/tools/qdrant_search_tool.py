@@ -26,14 +26,22 @@ def _search(repo: QdrantRepository, query: str, user_id: str | None, settings) -
 
 async def search_documents(query: str, tool_context: ToolContext) -> dict:
     """
-    Tìm kiếm tài liệu liên quan trong vector database dựa trên câu hỏi.
+    Tìm kiếm nội dung trong các tài liệu PDF và file mà người dùng đã upload.
+
+    Dùng khi người dùng hỏi về nội dung tài liệu: báo cáo, hợp đồng, tài liệu kỹ thuật,
+    bài báo, slide, v.v. Không dùng cho câu hỏi về cuộc họp hay transcript.
+
+    Query nên là cụm từ khóa cụ thể, không phải câu hỏi nguyên văn.
+    Ví dụ: "ngân sách Q1 2024 hạng mục" thay vì "ngân sách Q1 được duyệt bao nhiêu?".
+    Nếu kết quả rỗng hoặc không liên quan, thử lại với query rộng hơn hoặc từ đồng nghĩa.
 
     Args:
-        query: Câu hỏi hoặc từ khóa tìm kiếm.
+        query: Cụm từ khóa mô tả thông tin cần tìm trong tài liệu.
         tool_context: ADK tool context chứa session state.
 
     Returns:
-        Dict với danh sách các đoạn tài liệu liên quan và nguồn trích dẫn.
+        Dict với danh sách các đoạn tài liệu liên quan, tên file nguồn và relevance score.
+        Trả về found=False nếu không có kết quả vượt score threshold.
     """
     settings = get_settings()
     user_id = tool_context.state.get("user_id")

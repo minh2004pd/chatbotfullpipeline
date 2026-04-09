@@ -1,11 +1,3 @@
-# ── ENI Trunking (bắt buộc cho awsvpc network mode trên EC2 launch type) ─────
-# Cho phép nhiều task dùng awsvpc trên cùng 1 EC2 instance
-# Một lần per account per region — không ảnh hưởng resource đang chạy
-resource "aws_ecs_account_setting_default" "awsvpc_trunking" {
-  name  = "awsvpcTrunking"
-  value = "enabled"
-}
-
 resource "aws_ecs_cluster" "main" {
   name = var.ecs_cluster_name
 
@@ -20,17 +12,50 @@ resource "aws_ecs_cluster" "main" {
 # ── Task Definition ──────────────────────────────────────────────────────────
 resource "aws_ecs_task_definition" "backend" {
   family             = var.ecs_task_family
-  network_mode       = "awsvpc" # mỗi task có ENI riêng trong VPC
+  network_mode       = "host" # cả 2 container dùng chung network EC2 host
   execution_role_arn = aws_iam_role.ecs_task_execution_role.arn
-  task_role_arn      = aws_iam_role.ecs_task_role.arn
+  task_role_arn      = aws_iam_role.ecs_task_role.arn # runtime role cho DynamoDB access
 
   cpu    = var.task_cpu
   memory = var.task_memory
 
-  # Qdrant đã được tách ra service riêng — không cần qdrant-storage volume
-  # và không cần qdrant sidecar container nữa
+  # Bind mount /qdrant/storage trên EBS gp3 vào container Qdrant
+  # Dữ liệu vector không mất khi container restart
+  volume {
+    name      = "qdrant-storage"
+    host_path = "/qdrant/storage"
+  }
 
   container_definitions = jsonencode([
+    # ── Sidecar: Qdrant vector DB ─────────────────────────────────────────
+    {
+      name  = "qdrant"
+      image = "qdrant/qdrant:latest"
+
+      # Soft limit — có thể dùng thêm RAM nếu host còn trống
+      memoryReservation = 512
+      cpu               = 256
+
+      # essential = true: nếu Qdrant crash → cả task restart
+      # Đảm bảo backend và Qdrant luôn chạy cùng nhau
+      essential = true
+
+      mountPoints = [{
+        sourceVolume  = "qdrant-storage"
+        containerPath = "/qdrant/storage"
+      }]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = "/ecs/${var.project_name}"
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "qdrant"
+          "awslogs-create-group"  = "true"
+        }
+      }
+    },
+
     # ── Main: FastAPI backend ─────────────────────────────────────────────
     {
       name  = var.container_name
@@ -41,7 +66,11 @@ resource "aws_ecs_task_definition" "backend" {
 
       essential = true
 
-      # Không còn dependsOn qdrant — Qdrant là service riêng biệt
+      # Backend chỉ start sau khi Qdrant healthy
+      dependsOn = [{
+        containerName = "qdrant"
+        condition     = "START"
+      }]
 
       portMappings = [{
         containerPort = var.container_port
@@ -51,7 +80,6 @@ resource "aws_ecs_task_definition" "backend" {
       environment = [
         { name = "GEMINI_MODEL", value = var.gemini_model },
         { name = "GEMINI_EMBEDDING_MODEL", value = "gemini-embedding-001" },
-        # Qdrant service discovery: resolve qua Cloud Map DNS
         { name = "QDRANT_URL", value = var.qdrant_url },
         { name = "ALLOWED_ORIGINS", value = var.allowed_origins },
         { name = "STORAGE_BACKEND", value = var.storage_backend },
@@ -100,8 +128,6 @@ resource "aws_ecs_task_definition" "backend" {
   ])
 
   tags = { Project = var.project_name }
-
-  depends_on = [aws_ecs_service.qdrant]
 }
 
 # ── ECS Service ──────────────────────────────────────────────────────────────
@@ -112,26 +138,7 @@ resource "aws_ecs_service" "backend" {
   desired_count   = var.desired_count
   launch_type     = "EC2"
 
-  # awsvpc: mỗi task có ENI riêng trong private subnets
-  network_configuration {
-    subnets         = aws_subnet.private[*].id
-    security_groups = [aws_security_group.backend_new.id]
-  }
-
-  # ALB routes traffic đến backend tasks
-  load_balancer {
-    target_group_arn = aws_lb_target_group.backend.arn
-    container_name   = var.container_name
-    container_port   = var.container_port
-  }
-
-  # Rolling deploy: Terraform destroy + recreate service khi thêm load_balancer lần đầu
-  # create_before_destroy giảm thiểu downtime
-  lifecycle {
-    create_before_destroy = true
-  }
-
-  # Min 0 cho phép stop task cũ trước khi start task mới (single instance)
+  # Single instance: cho phép stop task cũ trước khi start task mới
   deployment_minimum_healthy_percent = 0
   deployment_maximum_percent         = 100
 
@@ -140,11 +147,7 @@ resource "aws_ecs_service" "backend" {
 
   tags = { Project = var.project_name }
 
-  depends_on = [
-    aws_instance.ecs_host_new,
-    aws_ecs_service.qdrant,
-    aws_lb_listener.http,
-  ]
+  depends_on = [aws_instance.ecs_host]
 }
 
 # ── SSM Parameters (SecureString) cho sensitive values ───────────────────────
