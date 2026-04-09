@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from app.agents.tools.wiki_tools import list_wiki_pages, read_wiki_index, read_wiki_page
 
 
@@ -109,7 +107,9 @@ def test_read_wiki_page_strips_leading_slash():
         result = read_wiki_page("/pages/topics/test.md", _make_tool_context())
 
     assert result["found"] is True
-    mock_repo.read_page.assert_called_once_with(user_id="user_test", rel_path="pages/topics/test.md")
+    mock_repo.read_page.assert_called_once_with(
+        user_id="user_test", rel_path="pages/topics/test.md"
+    )
 
 
 def test_read_wiki_page_error():
@@ -190,4 +190,6 @@ def test_list_wiki_pages_uses_correct_user_id():
     with patch("app.agents.tools.wiki_tools._repo", return_value=mock_repo):
         list_wiki_pages("summaries", ctx)
 
-    mock_repo.list_pages_in_category.assert_called_once_with(user_id="special_user", category="summaries")
+    mock_repo.list_pages_in_category.assert_called_once_with(
+        user_id="special_user", category="summaries"
+    )

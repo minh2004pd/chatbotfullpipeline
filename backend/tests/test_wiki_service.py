@@ -13,7 +13,6 @@ from app.services.wiki_service import (
     _strip_code_fence,
 )
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 
@@ -111,8 +110,11 @@ async def test_extract_topics_fallback_has_all_3_categories(service):
     with patch.object(service, "_extract_topics", wraps=service._extract_topics):
         # Patch LLM để raise exception → trigger fallback
         from unittest.mock import patch as _patch
+
         with _patch("app.services.wiki_service.get_genai_client") as mock_client:
-            mock_client.return_value.aio.models.generate_content.side_effect = RuntimeError("LLM down")
+            mock_client.return_value.aio.models.generate_content.side_effect = RuntimeError(
+                "LLM down"
+            )
             result = await service._extract_topics(text="some text", source_name="paper.pdf")
 
     categories = {t["category"] for t in result}
@@ -127,14 +129,16 @@ async def test_extract_topics_preserves_entity_type(service):
     import json
     from unittest.mock import patch as _patch
 
-    llm_response = json.dumps({
-        "entities": [
-            {"slug": "lora", "title": "LoRA", "type": "method"},
-            {"slug": "gpt-4o", "title": "GPT-4o", "type": "model"},
-        ],
-        "topics": [{"slug": "peft", "title": "Parameter-efficient Fine-tuning"}],
-        "summary": {"slug": "lora-paper", "title": "Tóm tắt: LoRA paper"},
-    })
+    llm_response = json.dumps(
+        {
+            "entities": [
+                {"slug": "lora", "title": "LoRA", "type": "method"},
+                {"slug": "gpt-4o", "title": "GPT-4o", "type": "model"},
+            ],
+            "topics": [{"slug": "peft", "title": "Parameter-efficient Fine-tuning"}],
+            "summary": {"slug": "lora-paper", "title": "Tóm tắt: LoRA paper"},
+        }
+    )
     mock_resp = MagicMock()
     mock_resp.text = llm_response
 
@@ -155,17 +159,21 @@ async def test_extract_topics_empty_llm_arrays_gets_fallbacks(service):
     import json
     from unittest.mock import patch as _patch
 
-    llm_response = json.dumps({
-        "entities": [],   # LLM không tìm thấy entity nào
-        "topics": [],     # LLM không tìm thấy topic nào
-        "summary": {"slug": "paper-summary", "title": "Tóm tắt: paper.pdf"},
-    })
+    llm_response = json.dumps(
+        {
+            "entities": [],  # LLM không tìm thấy entity nào
+            "topics": [],  # LLM không tìm thấy topic nào
+            "summary": {"slug": "paper-summary", "title": "Tóm tắt: paper.pdf"},
+        }
+    )
 
     mock_resp = MagicMock()
     mock_resp.text = llm_response
 
-    with _patch("app.services.wiki_service.get_genai_client") as mock_client, \
-         _patch("app.services.wiki_service._with_retry", new=AsyncMock(return_value=mock_resp)):
+    with (
+        _patch("app.services.wiki_service.get_genai_client") as mock_client,
+        _patch("app.services.wiki_service._with_retry", new=AsyncMock(return_value=mock_resp)),
+    ):
         mock_client.return_value  # không dùng trực tiếp vì _with_retry bị mock
         result = await service._extract_topics(text="some text", source_name="paper.pdf")
 
@@ -265,7 +273,9 @@ async def test_update_wiki_disabled_does_nothing(repo, settings):
 @pytest.mark.asyncio
 async def test_update_wiki_from_document_catches_errors(service):
     """Lỗi trong pipeline phải được catch, không propagate."""
-    with patch.object(service, "_extract_topics", new=AsyncMock(side_effect=RuntimeError("LLM fail"))):
+    with patch.object(
+        service, "_extract_topics", new=AsyncMock(side_effect=RuntimeError("LLM fail"))
+    ):
         # Không raise
         await service.update_wiki_from_document(
             user_id=USER,
@@ -321,9 +331,7 @@ async def test_update_wiki_empty_utterances_does_nothing(service, repo):
 @pytest.mark.asyncio
 async def test_remove_source_deletes_single_source_page(service, repo):
     """Page có đúng 1 source → bị xóa."""
-    page_content = (
-        "---\ntitle: Q1 Plan\nsources: [doc-to-delete]\nlast_updated: 2026-04-09\nversion: 1\n---\n\n# Q1 Plan"
-    )
+    page_content = "---\ntitle: Q1 Plan\nsources: [doc-to-delete]\nlast_updated: 2026-04-09\nversion: 1\n---\n\n# Q1 Plan"
     repo.ensure_wiki_structure(user_id=USER)
     repo.write_page(user_id=USER, rel_path="pages/topics/q1-plan.md", content=page_content)
 
@@ -335,9 +343,7 @@ async def test_remove_source_deletes_single_source_page(service, repo):
 @pytest.mark.asyncio
 async def test_remove_source_resynthesize_multi_source_page(service, repo):
     """Page có nhiều sources → LLM re-synthesize, không xóa."""
-    page_content = (
-        "---\ntitle: Multi\nsources: [doc-keep, doc-delete]\nlast_updated: 2026-04-09\nversion: 2\n---\n\n# Multi"
-    )
+    page_content = "---\ntitle: Multi\nsources: [doc-keep, doc-delete]\nlast_updated: 2026-04-09\nversion: 2\n---\n\n# Multi"
     repo.ensure_wiki_structure(user_id=USER)
     repo.write_page(user_id=USER, rel_path="pages/topics/multi.md", content=page_content)
 
@@ -369,12 +375,19 @@ async def test_remove_source_skips_unrelated_pages(service, repo):
 
 
 def test_rebuild_index_includes_all_pages(service, repo):
-    repo.write_page(user_id=USER, rel_path="pages/topics/proj-a.md",
-                    content="---\ntitle: Project A\n---\n# A")
-    repo.write_page(user_id=USER, rel_path="pages/entities/gemini.md",
-                    content="---\ntitle: Gemini 2.5 Flash\n---\n# G")
-    repo.write_page(user_id=USER, rel_path="pages/summaries/doc-1.md",
-                    content="---\ntitle: Document 1 Summary\n---\n# D")
+    repo.write_page(
+        user_id=USER, rel_path="pages/topics/proj-a.md", content="---\ntitle: Project A\n---\n# A"
+    )
+    repo.write_page(
+        user_id=USER,
+        rel_path="pages/entities/gemini.md",
+        content="---\ntitle: Gemini 2.5 Flash\n---\n# G",
+    )
+    repo.write_page(
+        user_id=USER,
+        rel_path="pages/summaries/doc-1.md",
+        content="---\ntitle: Document 1 Summary\n---\n# D",
+    )
 
     service._rebuild_index(user_id=USER)
 

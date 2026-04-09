@@ -303,39 +303,47 @@ class WikiService:
                     # Entities — giữ lại "type" để dùng đúng template synthesis
                     for e in parsed.get("entities", []):
                         if isinstance(e, dict) and e.get("slug"):
-                            entities.append({
-                                "slug": _slugify(e["slug"]),
-                                "category": "entities",
-                                "title": e.get("title", e["slug"]),
-                                "type": e.get("type", ""),  # model|framework|dataset|...
-                            })
+                            entities.append(
+                                {
+                                    "slug": _slugify(e["slug"]),
+                                    "category": "entities",
+                                    "title": e.get("title", e["slug"]),
+                                    "type": e.get("type", ""),  # model|framework|dataset|...
+                                }
+                            )
 
                     # Topics
                     for t in parsed.get("topics", []):
                         if isinstance(t, dict) and t.get("slug"):
-                            topics.append({
-                                "slug": _slugify(t["slug"]),
-                                "category": "topics",
-                                "title": t.get("title", t["slug"]),
-                            })
+                            topics.append(
+                                {
+                                    "slug": _slugify(t["slug"]),
+                                    "category": "topics",
+                                    "title": t.get("title", t["slug"]),
+                                }
+                            )
 
                     # Đảm bảo luôn có ít nhất 1 entity
                     if not entities:
-                        entities.append({
-                            "slug": _slugify(source_name),
-                            "category": "entities",
-                            "title": source_name,
-                            "type": "",
-                        })
+                        entities.append(
+                            {
+                                "slug": _slugify(source_name),
+                                "category": "entities",
+                                "title": source_name,
+                                "type": "",
+                            }
+                        )
                         logger.warning("wiki_no_entities_fallback", source=source_name)
 
                     # Đảm bảo luôn có ít nhất 1 topic
                     if not topics:
-                        topics.append({
-                            "slug": ("topic-" + _slugify(source_name))[:60],
-                            "category": "topics",
-                            "title": f"Chủ đề: {source_name}",
-                        })
+                        topics.append(
+                            {
+                                "slug": ("topic-" + _slugify(source_name))[:60],
+                                "category": "topics",
+                                "title": f"Chủ đề: {source_name}",
+                            }
+                        )
                         logger.warning("wiki_no_topics_fallback", source=source_name)
 
                     # Summary — luôn có đúng 1
@@ -361,7 +369,11 @@ class WikiService:
         base_slug = _slugify(source_name)
         return [
             {"slug": base_slug, "category": "entities", "title": source_name},
-            {"slug": ("topic-" + base_slug)[:60], "category": "topics", "title": f"Chủ đề: {source_name}"},
+            {
+                "slug": ("topic-" + base_slug)[:60],
+                "category": "topics",
+                "title": f"Chủ đề: {source_name}",
+            },
             {"slug": base_slug, "category": "summaries", "title": f"Tóm tắt: {source_name}"},
         ]
 
@@ -548,7 +560,9 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
-def _simple_page(topic_title: str, topic_type: str, source_name: str, source_id: str, text: str) -> str:
+def _simple_page(
+    topic_title: str, topic_type: str, source_name: str, source_id: str, text: str
+) -> str:
     """Fallback page khi LLM không khả dụng."""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     excerpt = text[:500].replace("\n", " ")

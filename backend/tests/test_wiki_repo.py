@@ -192,7 +192,9 @@ def test_append_log_rotation(repo):
 
 
 def test_write_and_read_raw(repo):
-    repo.write_raw(user_id=USER, category="documents", filename="doc-abc.txt", content="Nội dung PDF")
+    repo.write_raw(
+        user_id=USER, category="documents", filename="doc-abc.txt", content="Nội dung PDF"
+    )
     result = repo.read_raw(user_id=USER, category="documents", filename="doc-abc.txt")
     assert result == "Nội dung PDF"
 
