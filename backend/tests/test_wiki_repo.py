@@ -33,29 +33,29 @@ def test_ensure_creates_index_and_log(repo, wiki_dir):
     assert (Path(wiki_dir) / USER / "log.md").exists()
 
 
-def test_ensure_creates_claude_md(repo, wiki_dir):
-    """CLAUDE.md (schema/hiến pháp) phải được tạo cùng với cấu trúc wiki."""
+def test_ensure_creates_wiki_schema_md(repo, wiki_dir):
+    """wiki_schema.md (schema/hiến pháp) phải được tạo cùng với cấu trúc wiki."""
     from pathlib import Path
 
     repo.ensure_wiki_structure(user_id=USER)
-    claude_md = Path(wiki_dir) / USER / "CLAUDE.md"
-    assert claude_md.exists()
-    content = claude_md.read_text()
+    schema_md = Path(wiki_dir) / USER / "wiki_schema.md"
+    assert schema_md.exists()
+    content = schema_md.read_text()
     assert "Wiki Schema" in content
     assert "entities/" in content
     assert "topics/" in content
     assert "summaries/" in content
 
 
-def test_ensure_claude_md_idempotent(repo, wiki_dir):
-    """Gọi nhiều lần không overwrite CLAUDE.md đã có."""
+def test_ensure_wiki_schema_md_idempotent(repo, wiki_dir):
+    """Gọi nhiều lần không overwrite wiki_schema.md đã có."""
     from pathlib import Path
 
     repo.ensure_wiki_structure(user_id=USER)
-    claude_path = Path(wiki_dir) / USER / "CLAUDE.md"
-    claude_path.write_text("# Custom Schema")
+    schema_path = Path(wiki_dir) / USER / "wiki_schema.md"
+    schema_path.write_text("# Custom Schema")
     repo.ensure_wiki_structure(user_id=USER)
-    assert claude_path.read_text() == "# Custom Schema"
+    assert schema_path.read_text() == "# Custom Schema"
 
 
 def test_ensure_creates_page_subdirs(repo, wiki_dir):

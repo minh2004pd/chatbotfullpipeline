@@ -24,14 +24,14 @@ def _repo():
 
 def read_wiki_index(tool_context: ToolContext) -> dict:
     """
-    Đọc "bản đồ tri thức" Wiki — liệt kê tất cả trang Wiki AI đã tổng hợp.
+    Đọc danh sách TẤT CẢ trang Wiki đã tổng hợp — LUÔN gọi tool này ĐẦU TIÊN
+    cho MỌI câu hỏi về nội dung (entities, models, methods, concepts, papers,
+    meetings, topics, so sánh, tổng quan, chi tiết kỹ thuật...).
 
-    Dùng TRƯỚC khi đọc trang cụ thể. Index (~1-2k tokens) cho biết wiki đang có gì,
-    giúp chọn đúng trang cần đọc tiếp. Gọi khi câu hỏi yêu cầu tổng hợp cross-source
-    hoặc overview về project/topic/entity (ví dụ: "dự án X hiện tại thế nào?",
-    "tóm tắt về Y", "Q1 planning ra sao?").
-
-    Sau khi đọc index, dùng rel_path từ index để gọi read_wiki_page.
+    Wiki là knowledge base tổng hợp cross-source. Index (~1-2k tokens) trả về
+    danh sách rel_path của tất cả pages. Sau đó dùng read_wiki_page để đọc nội dung.
+    Chỉ gọi search_documents / search_meeting_transcripts SAU KHI đã đọc wiki
+    và xác định wiki không đủ thông tin cần thiết.
 
     Returns:
         Dict với content (nội dung index.md), page_count (số trang).
@@ -77,21 +77,25 @@ def read_wiki_index(tool_context: ToolContext) -> dict:
 
 def read_wiki_page(rel_path: str, tool_context: ToolContext) -> dict:
     """
-    Đọc nội dung đầy đủ một trang Wiki cụ thể (Markdown + YAML frontmatter).
+    Đọc nội dung đầy đủ một trang Wiki (Markdown + YAML frontmatter + backlinks).
 
-    Dùng SAU read_wiki_index khi biết chính xác trang cần đọc.
-    rel_path là đường dẫn tương đối xuất hiện trong index.md,
-    ví dụ: "pages/topics/q1-planning.md", "pages/entities/gemini-2-5-flash.md".
+    Gọi SAU read_wiki_index với rel_path lấy từ index.
+    Ví dụ: "pages/entities/lora.md", "pages/topics/efficientml.md".
 
-    Wiki page chứa synthesis từ nhiều documents/meetings, kèm lịch sử thay đổi quyết định.
+    Response bao gồm:
+    - content: nội dung tổng hợp cross-source của trang
+    - backlinks: danh sách rel_path các trang khác đang link đến trang này
+    - is_stub: True nếu trang chỉ là placeholder, chưa có nội dung đầy đủ
+
+    Nếu is_stub=True hoặc nội dung chưa đủ → gọi search_documents để bổ sung.
+    Nếu trang có [[pages/.../*.md]] links liên quan → đọc thêm bằng read_wiki_page.
 
     Args:
         rel_path: Đường dẫn tương đối tới trang Wiki (lấy từ read_wiki_index).
         tool_context: ADK tool context.
 
     Returns:
-        Dict với content (Markdown đầy đủ), rel_path, found.
-        found=False nếu trang không tồn tại.
+        Dict với content, rel_path, backlinks, is_stub, found.
     """
     user_id = tool_context.state.get("user_id", "default_user")
     logger.info("agent_tool_called", tool="read_wiki_page", user_id=user_id, rel_path=rel_path)
@@ -119,11 +123,21 @@ def read_wiki_page(rel_path: str, tool_context: ToolContext) -> dict:
                 "message": f"Trang Wiki '{rel_path}' không tồn tại.",
             }
 
-        logger.info("wiki_page_read", user_id=user_id, path=rel_path)
+        # Backlinks: các trang khác đang link đến trang này (so sánh theo rel_path)
+        link_index = repo.read_link_index(user_id=user_id)
+        backlinks = [p for p, links in link_index.items() if rel_path in links]
+
+        # Stub page: version 0 = chưa có nội dung đầy đủ
+        is_stub = "stub: true" in content
+
+        logger.info("wiki_page_read", user_id=user_id, path=rel_path, backlink_count=len(backlinks))
         return {
             "found": True,
             "content": content,
             "rel_path": rel_path,
+            "backlinks": backlinks,
+            "backlink_count": len(backlinks),
+            "is_stub": is_stub,
         }
 
     except Exception as e:

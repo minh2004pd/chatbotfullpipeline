@@ -159,6 +159,36 @@ export interface LiveUtterance {
   isFinal: boolean
 }
 
+// ─── Wiki Graph types ────────────────────────────────────────────────────────────
+
+export interface WikiGraphNode {
+  key: string     // unique React Flow id: "{category}/{slug}"
+  id: string      // slug only, for API calls
+  title: string
+  type: string
+  category: 'entities' | 'topics' | 'summaries'
+  source_count: number
+  backlink_count: number
+  is_stub: boolean
+}
+
+export interface WikiGraphEdge {
+  id: string
+  source: string
+  target: string
+}
+
+export interface WikiGraphData {
+  nodes: WikiGraphNode[]
+  edges: WikiGraphEdge[]
+}
+
+export interface WikiPage {
+  slug: string
+  category: string
+  content: string
+}
+
 // ─── UI / Store types ────────────────────────────────────────────────────────────
 
 export interface Toast {
@@ -189,6 +219,8 @@ export interface ChatStore {
 export interface UploadProgress {
   filename: string
   progress: number
-  status: 'uploading' | 'done' | 'error'
+  status: 'uploading' | 'rag_done' | 'wiki_processing' | 'done' | 'error'
+  documentId?: string   // set sau khi upload API trả về
+  chunkCount?: number   // set từ RAG result
   error?: string
 }

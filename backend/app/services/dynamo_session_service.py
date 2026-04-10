@@ -105,10 +105,33 @@ class DynamoDBSessionService(BaseSessionService):
         return result
 
     def _serialize_events(self, events: list[Event]) -> str:
-        """Serialize list[Event] → JSON string (dùng model_dump để tránh circular ref)."""
+        """Serialize list[Event] → JSON string, chỉ giữ user message và model text response.
+
+        Tool call/response events bị loại bỏ hoàn toàn trước khi lưu DynamoDB
+        để tránh vượt giới hạn 400KB.
+        """
         raw = [e.model_dump(mode="json") for e in events]
         raw = self._strip_inline_images(raw)
+        raw = self._filter_to_conversation_events(raw)
         return json.dumps(raw)
+
+    @staticmethod
+    def _filter_to_conversation_events(raw_events: list[dict]) -> list[dict]:
+        """Chỉ giữ events chứa user text hoặc model text response.
+
+        Loại bỏ: function_call, function_response (tool outputs) — quá lớn và không cần thiết
+        để reconstruct conversation history.
+        """
+        result = []
+        for event in raw_events:
+            parts = (event.get("content") or {}).get("parts") or []
+            has_tool = any(p.get("function_call") or p.get("function_response") for p in parts)
+            if has_tool:
+                continue
+            has_text = any(p.get("text") for p in parts)
+            if has_text:
+                result.append(event)
+        return result
 
     def _deserialize_events(self, events_json: str) -> list[Event]:
         """Deserialize JSON string → list[Event]."""
@@ -261,7 +284,7 @@ class DynamoDBSessionService(BaseSessionService):
             if new_title:
                 current_title = new_title
 
-        # Cập nhật session lên DynamoDB (app/user state đã được super() xử lý)
+        # Cập nhật session lên DynamoDB — _serialize_events chỉ lưu user/model text events
         dynamo_item = self._session_to_item(session, title=current_title, created_at=created_at)
         self._table.put_item(Item=dynamo_item)
 

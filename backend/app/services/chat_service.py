@@ -113,30 +113,50 @@ class ChatService:
         final_text = ""
         citations: list[Citation] = []
 
-        async for event in self.runner.run_async(
-            user_id=request.user_id,
-            session_id=session_id,
-            new_message=user_content,
-        ):
-            if event.is_final_response() and event.content:
-                for part in event.content.parts or []:
-                    if part.text:
-                        final_text += part.text
+        max_retries = 5
+        for attempt in range(max_retries):
+            if attempt > 0:
+                delay = min((2**attempt) * 3 + random.uniform(0, 2), 60.0)
+                logger.warning("chat_retry", attempt=attempt, delay=round(delay, 2))
+                await asyncio.sleep(delay)
+            try:
+                async for event in self.runner.run_async(
+                    user_id=request.user_id,
+                    session_id=session_id,
+                    new_message=user_content,
+                ):
+                    if event.is_final_response() and event.content:
+                        for part in event.content.parts or []:
+                            if part.text:
+                                final_text += part.text
 
-            if event.content and event.content.parts:
-                for part in event.content.parts:
-                    if hasattr(part, "function_response") and part.function_response:
-                        resp = part.function_response
-                        if resp.name == "search_documents":
-                            for r in (resp.response or {}).get("results", []):
-                                citations.append(
-                                    Citation(
-                                        document_id=r.get("document_id", ""),
-                                        document_name=r.get("source", ""),
-                                        chunk_text=r.get("text", "")[:200],
-                                        score=r.get("relevance_score", 0.0),
-                                    )
-                                )
+                    if event.content and event.content.parts:
+                        for part in event.content.parts:
+                            if hasattr(part, "function_response") and part.function_response:
+                                resp = part.function_response
+                                if resp.name == "search_documents":
+                                    for r in (resp.response or {}).get("results", []):
+                                        citations.append(
+                                            Citation(
+                                                document_id=r.get("document_id", ""),
+                                                document_name=r.get("source", ""),
+                                                chunk_text=r.get("text", "")[:200],
+                                                score=r.get("relevance_score", 0.0),
+                                            )
+                                        )
+                break  # thành công → dừng retry
+            except Exception as exc:
+                err_str = str(exc)
+                is_retryable = (
+                    "RESOURCE_EXHAUSTED" in err_str
+                    or "429" in err_str
+                    or "503" in err_str
+                    or "UNAVAILABLE" in err_str
+                )
+                if is_retryable and attempt < max_retries - 1:
+                    logger.warning("chat_retry_error", attempt=attempt, error=err_str[:100])
+                    continue
+                raise
 
         logger.info("chat_done", user_id=request.user_id, session_id=session_id)
         return ChatResponse(
@@ -158,11 +178,12 @@ class ChatService:
         )
 
         run_config = RunConfig(streaming_mode=StreamingMode.SSE)
-        max_retries = 3
+        max_retries = 5
 
         for attempt in range(max_retries):
             if attempt > 0:
-                delay = (2**attempt) + random.uniform(0, 1)
+                # 503 cần delay dài hơn 429 (server-side overload recover chậm hơn)
+                delay = min((2**attempt) * 3 + random.uniform(0, 2), 60.0)
                 logger.warning(
                     "chat_stream_retry",
                     attempt=attempt,
@@ -192,7 +213,13 @@ class ChatService:
                                 yield part.text
                 return  # thành công → dừng retry
             except Exception as exc:
-                is_rate_limit = "RESOURCE_EXHAUSTED" in str(exc) or "429" in str(exc)
+                err_str = str(exc)
+                is_rate_limit = (
+                    "RESOURCE_EXHAUSTED" in err_str
+                    or "429" in err_str
+                    or "503" in err_str
+                    or "UNAVAILABLE" in err_str
+                )
 
                 if is_rate_limit and not yielded_any and attempt < max_retries - 1:
                     # Chưa yield gì + còn lượt retry → thử lại
@@ -212,7 +239,7 @@ class ChatService:
                     exc_info=True,
                 )
                 if is_rate_limit:
-                    yield "\n\n[API Gemini đang quá tải, vui lòng thử lại sau vài giây.]"
+                    yield "\n\n[API Gemini đang quá tải (rate limit / server overload), vui lòng thử lại sau vài giây.]"
                 else:
                     yield f"\n\n[Lỗi xử lý: {exc}]"
                 return

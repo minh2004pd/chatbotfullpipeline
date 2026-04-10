@@ -20,6 +20,8 @@ export const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  // FastAPI expects repeated params for arrays: ?a=1&a=2, not ?a[]=1&a[]=2
+  paramsSerializer: { indexes: null },
 })
 
 // Inject X-User-ID header on every request

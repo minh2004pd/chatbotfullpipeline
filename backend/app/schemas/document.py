@@ -28,3 +28,16 @@ class DocumentListResponse(BaseModel):
 class DocumentDeleteResponse(BaseModel):
     document_id: str
     message: str = "Document deleted successfully"
+
+
+class IndexingStatusResponse(BaseModel):
+    document_id: str
+    rag: str  # luôn là "done" (RAG là synchronous, xong trước khi response trả về)
+    wiki: str  # "processing" | "done" | "error" | "disabled"
+
+
+class WikiNormalizeResponse(BaseModel):
+    renamed: int
+    merged: int
+    skipped: int
+    message: str = "Wiki slug normalization complete"

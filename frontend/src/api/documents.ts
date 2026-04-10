@@ -5,6 +5,12 @@ import type {
 } from '@/types'
 import { apiClient } from './client'
 
+interface IndexingStatusResponse {
+  document_id: string
+  rag: string   // "done"
+  wiki: string  // "processing" | "done" | "error" | "disabled"
+}
+
 export const documentsApi = {
   list: async (): Promise<ListDocumentsResponse> => {
     const res = await apiClient.get<ListDocumentsResponse>('/api/v1/documents')
@@ -36,6 +42,13 @@ export const documentsApi = {
   delete: async (documentId: string): Promise<DeleteDocumentResponse> => {
     const res = await apiClient.delete<DeleteDocumentResponse>(
       `/api/v1/documents/${documentId}`,
+    )
+    return res.data
+  },
+
+  getIndexingStatus: async (documentId: string): Promise<IndexingStatusResponse> => {
+    const res = await apiClient.get<IndexingStatusResponse>(
+      `/api/v1/documents/${documentId}/status`,
     )
     return res.data
   },

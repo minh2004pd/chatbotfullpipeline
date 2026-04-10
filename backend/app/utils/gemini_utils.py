@@ -16,10 +16,10 @@ logger = structlog.get_logger(__name__)
 # Cache kích thước 256 cho query embeddings — cùng query không embed lại
 _QUERY_EMBEDDING_CACHE_SIZE = 256
 
-# Retry config cho 429 RESOURCE_EXHAUSTED
-_RETRY_MAX_ATTEMPTS = 3
+# Retry config cho 429 RESOURCE_EXHAUSTED / 503 UNAVAILABLE
+_RETRY_MAX_ATTEMPTS = 6
 _RETRY_BASE_DELAY = 1.0  # seconds
-_RETRY_MAX_DELAY = 10.0  # seconds cap
+_RETRY_MAX_DELAY = 60.0  # seconds cap — 503 cần thời gian dài hơn để recover
 
 
 async def _with_retry(coro_fn, *args, **kwargs):
@@ -33,15 +33,26 @@ async def _with_retry(coro_fn, *args, **kwargs):
             return await coro_fn(*args, **kwargs)
         except Exception as exc:
             err_str = str(exc)
-            if "429" not in err_str and "RESOURCE_EXHAUSTED" not in err_str:
+            is_retryable = (
+                "429" in err_str
+                or "RESOURCE_EXHAUSTED" in err_str
+                or "500" in err_str
+                or "INTERNAL" in err_str
+                or "503" in err_str
+                or "UNAVAILABLE" in err_str
+            )
+            if not is_retryable:
                 raise  # Lỗi khác → không retry
             last_exc = exc
-            delay = min(_RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 1), _RETRY_MAX_DELAY)
+            # 500/503 cần delay cao hơn 429 vì server-side error thường cần thêm thời gian
+            base = 3.0 if ("500" in err_str or "INTERNAL" in err_str or "503" in err_str or "UNAVAILABLE" in err_str) else _RETRY_BASE_DELAY
+            delay = min(base * (2**attempt) + random.uniform(0, 1), _RETRY_MAX_DELAY)
             logger.warning(
-                "gemini_rate_limit_retry",
+                "gemini_api_retry",
                 attempt=attempt + 1,
                 max_attempts=_RETRY_MAX_ATTEMPTS,
                 delay_s=round(delay, 2),
+                error=err_str[:120],
             )
             await asyncio.sleep(delay)
 

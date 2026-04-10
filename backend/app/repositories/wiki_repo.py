@@ -13,9 +13,10 @@ Cấu trúc thư mục:
   ├── pages/summaries/   # tóm tắt từng nguồn riêng lẻ
   ├── index.md           # bản đồ tri thức (content map)
   ├── log.md             # nhật ký ingestion
-  └── CLAUDE.md          # schema/hiến pháp của wiki (tầng 3)
+  └── wiki_schema.md     # schema/hiến pháp của wiki (tầng 3)
 """
 
+import json
 from pathlib import Path
 
 import structlog
@@ -154,6 +155,11 @@ class WikiRepository:
 
     # ── Index & Log ───────────────────────────────────────────────────────────
 
+    def read_schema(self, *, user_id: str) -> str:
+        """Đọc wiki_schema.md — nguồn sự thật về quy tắc wiki của user này.
+        Trả về "" nếu chưa khởi tạo (first ingest sẽ tạo file này)."""
+        return self._read(user_id, "wiki_schema.md") or ""
+
     def read_index(self, *, user_id: str) -> str:
         """Đọc index.md — trả về "" nếu chưa có."""
         return self._read(user_id, "index.md") or ""
@@ -171,6 +177,23 @@ class WikiRepository:
         if len(lines) > _LOG_MAX_LINES:
             lines = lines[-_LOG_MAX_LINES:]
         self._write(user_id, "log.md", "\n".join(lines) + "\n")
+
+    # ── Link index ───────────────────────────────────────────────────────────
+
+    def read_link_index(self, *, user_id: str) -> dict[str, list[str]]:
+        """Đọc forward link index: {rel_path -> [slugs linked from this page]}.
+        Trả về {} nếu chưa có."""
+        content = self._read(user_id, "link_index.json")
+        if not content:
+            return {}
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            return {}
+
+    def write_link_index(self, *, user_id: str, data: dict[str, list[str]]) -> None:
+        """Ghi toàn bộ forward link index (overwrite)."""
+        self._write(user_id, "link_index.json", json.dumps(data, ensure_ascii=False, indent=2))
 
     # ── Raw sources ───────────────────────────────────────────────────────────
 
@@ -193,13 +216,13 @@ class WikiRepository:
     # ── Init ─────────────────────────────────────────────────────────────────
 
     def ensure_wiki_structure(self, *, user_id: str) -> None:
-        """Khởi tạo index.md, log.md và CLAUDE.md nếu chưa tồn tại."""
+        """Khởi tạo index.md, log.md và wiki_schema.md nếu chưa tồn tại."""
         if not self._read(user_id, "index.md"):
             self._write(user_id, "index.md", _INITIAL_INDEX)
         if not self._read(user_id, "log.md"):
             self._write(user_id, "log.md", "")
-        if not self._read(user_id, "CLAUDE.md"):
-            self._write(user_id, "CLAUDE.md", _WIKI_SCHEMA)
+        if not self._read(user_id, "wiki_schema.md"):
+            self._write(user_id, "wiki_schema.md", _WIKI_SCHEMA)
         # Local: tạo thư mục con
         if not self._s3:
             for sub in (
@@ -243,7 +266,7 @@ wiki/{user_id}/
 │   └── summaries/          # Tóm tắt chuyên sâu từng paper/nguồn đơn lẻ
 ├── index.md                # BẢN ĐỒ TRI THỨC — Entry point cho Agent
 ├── log.md                  # NHẬT KÝ HOẠT ĐỘNG (Append-only)
-└── CLAUDE.md               # TẦNG 3: HIẾN PHÁP — Quy tắc vận hành Wiki
+└── wiki_schema.md          # TẦNG 3: HIẾN PHÁP — Quy tắc vận hành Wiki
 ```
 
 ## Quy tắc phân loại
@@ -290,8 +313,10 @@ version: N
 
 ## Quy ước liên kết & trích dẫn
 
-- Link nội bộ: `[[slug]]` → `pages/{category}/slug.md`
-- Gắn nguồn sau claim: `[tên paper/nguồn]`
+- **Link nội bộ**: dùng full rel_path `[[pages/entities/slug.md]]`, `[[pages/topics/slug.md]]`, `[[pages/summaries/slug.md]]`
+  - Slug chỉ gồm `[a-z0-9]`, không dùng gạch ngang: "U-Net" → `[[pages/entities/unet.md]]`, "LoRA" → `[[pages/entities/lora.md]]`
+  - KHÔNG dùng `[[slug]]` thuần — luôn kèm đầy đủ path prefix và đuôi `.md`
+- **Trích dẫn nguồn**: `[tên paper/nguồn]` (dấu ngoặc đơn, không phải wiki link)
 - Giữ thuật ngữ kỹ thuật bằng tiếng Anh (không dịch "attention", "fine-tuning"...)
 - Mâu thuẫn giữa nguồn: `~~thông tin cũ [nguồn cũ]~~` → thông tin mới [nguồn mới]
 - Khi có mâu thuẫn hoặc nhiều phiên bản: thêm section `## Lịch sử / Tiến triển` dạng bảng

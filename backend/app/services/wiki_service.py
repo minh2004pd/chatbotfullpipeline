@@ -25,6 +25,7 @@ import json
 import re
 import unicodedata
 from datetime import datetime, timezone
+from pathlib import Path
 
 import structlog
 
@@ -37,6 +38,10 @@ logger = structlog.get_logger(__name__)
 
 # asyncio.Lock per page path để tránh race condition khi 2 ingestions cùng update 1 trang
 _page_locks: dict[str, asyncio.Lock] = {}
+# asyncio.Lock per user cho link_index.json (1 file chia sẻ toàn user)
+_link_index_locks: dict[str, asyncio.Lock] = {}
+# Regex extract [[slug]] links từ wiki content
+_WIKI_LINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 
 
 def _get_page_lock(user_id: str, rel_path: str) -> asyncio.Lock:
@@ -44,6 +49,12 @@ def _get_page_lock(user_id: str, rel_path: str) -> asyncio.Lock:
     if key not in _page_locks:
         _page_locks[key] = asyncio.Lock()
     return _page_locks[key]
+
+
+def _get_link_index_lock(user_id: str) -> asyncio.Lock:
+    if user_id not in _link_index_locks:
+        _link_index_locks[user_id] = asyncio.Lock()
+    return _link_index_locks[user_id]
 
 
 class WikiService:
@@ -64,6 +75,8 @@ class WikiService:
         """Entry point sau PDF upload. Safe để gọi với asyncio.create_task."""
         if not self._settings.wiki_enabled:
             return
+        from app.core.indexing_status import set_wiki_status
+
         try:
             await self._process_source(
                 user_id=user_id,
@@ -73,7 +86,9 @@ class WikiService:
                 raw_category="documents",
                 raw_filename=f"{document_id}.txt",
             )
+            set_wiki_status(user_id, document_id, "done")
         except Exception as e:
+            set_wiki_status(user_id, document_id, "error")
             logger.error("wiki_update_document_failed", document_id=document_id, error=str(e))
 
     async def update_wiki_from_transcript(
@@ -105,6 +120,63 @@ class WikiService:
             )
         except Exception as e:
             logger.error("wiki_update_transcript_failed", meeting_id=meeting_id, error=str(e))
+
+    def normalize_page_filenames(self, *, user_id: str) -> dict[str, int]:
+        """Migration: rename/merge các page files có slug không chuẩn về [a-z0-9].
+
+        - "Adam.md" → "adam.md"  (uppercase)
+        - "long-context.md" → "longcontext.md"  (gạch ngang)
+        - Nếu target đã tồn tại: merge sources, giữ nội dung target (version cao hơn)
+
+        Trả về: {"renamed": N, "merged": N, "skipped": N}
+        """
+        stats = {"renamed": 0, "merged": 0, "skipped": 0}
+        all_pages = self._repo.list_all_pages(user_id=user_id)
+
+        for page_info in all_pages:
+            filename = page_info["filename"]
+            category = page_info["category"]
+            old_rel = page_info["rel_path"]
+
+            raw_slug = filename.replace(".md", "")
+            new_slug = _slugify(raw_slug)
+
+            if not new_slug or new_slug == raw_slug:
+                stats["skipped"] += 1
+                continue  # đã chuẩn rồi
+
+            new_rel = f"pages/{category}/{new_slug}.md"
+            old_content = self._repo.read_page(user_id=user_id, rel_path=old_rel) or ""
+            existing_new = self._repo.read_page(user_id=user_id, rel_path=new_rel)
+
+            if existing_new:
+                # Merge sources: thêm sources của file cũ vào file mới
+                old_sources = _parse_frontmatter_sources(old_content)
+                new_sources = _parse_frontmatter_sources(existing_new)
+                merged_sources = list(dict.fromkeys(new_sources + old_sources))  # deduplicate, preserve order
+                if merged_sources != new_sources:
+                    updated = re.sub(
+                        r"^sources:\s*\[.*?\]",
+                        f"sources: [{', '.join(merged_sources)}]",
+                        existing_new,
+                        flags=re.MULTILINE,
+                    )
+                    self._repo.write_page(user_id=user_id, rel_path=new_rel, content=updated)
+                self._repo.delete_page(user_id=user_id, rel_path=old_rel)
+                logger.info("wiki_page_merged", user_id=user_id, old=old_rel, new=new_rel)
+                stats["merged"] += 1
+            else:
+                # Rename: ghi vào path mới, xóa path cũ
+                self._repo.write_page(user_id=user_id, rel_path=new_rel, content=old_content)
+                self._repo.delete_page(user_id=user_id, rel_path=old_rel)
+                logger.info("wiki_page_renamed", user_id=user_id, old=old_rel, new=new_rel)
+                stats["renamed"] += 1
+
+        if stats["renamed"] or stats["merged"]:
+            self._rebuild_index(user_id=user_id)
+            self._rebuild_link_index(user_id=user_id)
+
+        return stats
 
     async def remove_source_from_wiki(
         self,
@@ -142,6 +214,8 @@ class WikiService:
                 if len(sources) <= 1:
                     # Chỉ có source này → xóa page
                     self._repo.delete_page(user_id=user_id, rel_path=rel_path)
+                    # Xóa khỏi link index
+                    await self._update_link_index(user_id=user_id, rel_path=rel_path, new_links=[])
                     logger.info("wiki_page_deleted_orphan", user_id=user_id, path=rel_path)
                     pages_deleted += 1
                 else:
@@ -157,13 +231,20 @@ class WikiService:
                             self._repo.write_page(
                                 user_id=user_id, rel_path=rel_path, content=new_content
                             )
+                            # Cập nhật link index sau khi re-synthesize
+                            await self._update_link_index(
+                                user_id=user_id,
+                                rel_path=rel_path,
+                                new_links=_extract_wiki_links(new_content),
+                            )
                         pages_updated += 1
 
             # 2. Xóa raw file (documents hoặc transcripts)
             self._repo.delete_raw(user_id=user_id, source_id=source_id)
 
-            # 3. Luôn rebuild index và ghi log — bất kể có page nào thay đổi không
+            # 3. Luôn rebuild index + link index và ghi log
             self._rebuild_index(user_id=user_id)
+            self._rebuild_link_index(user_id=user_id)
             self._repo.append_log(
                 user_id=user_id,
                 entry=(
@@ -221,17 +302,22 @@ class WikiService:
             + summary_items  # luôn xử lý tất cả summaries (thường chỉ 1 per source)
         )
 
-        for topic in pages_to_process:
+        processed_paths: set[str] = set()
+        for i, topic in enumerate(pages_to_process):
             slug = topic.get("slug", "")
             category = topic.get("category", "summaries")
             title = topic.get("title", slug)
             topic_type = topic.get("type", "")  # chỉ entities có type (model/method/...)
             if not slug:
                 continue
+            # Throttle nhỏ giữa các LLM calls để tránh burst 503
+            if i > 0:
+                await asyncio.sleep(0.5)
             rel_path = f"pages/{category}/{slug}.md"
             async with _get_page_lock(user_id, rel_path):
                 existing = self._repo.read_page(user_id=user_id, rel_path=rel_path) or ""
                 new_content = await self._synthesize_page(
+                    user_id=user_id,
                     existing_content=existing,
                     new_text=truncated,
                     topic_title=title,
@@ -241,17 +327,42 @@ class WikiService:
                 )
                 if new_content:
                     self._repo.write_page(user_id=user_id, rel_path=rel_path, content=new_content)
+                    processed_paths.add(rel_path)
                     logger.info("wiki_page_updated", user_id=user_id, path=rel_path)
+                    # Cập nhật forward links cho trang vừa viết
+                    await self._update_link_index(
+                        user_id=user_id,
+                        rel_path=rel_path,
+                        new_links=_extract_wiki_links(new_content),
+                    )
+                    # Tạo stub cho [[slug]] chưa tồn tại
+                    await self._create_ghost_stubs(
+                        user_id=user_id,
+                        content=new_content,
+                        source_id=source_id,
+                        source_name=source_name,
+                    )
 
-        # 4. Rebuild index (rule-based)
+        # 4. Update related pages (pages hiện có đang link đến entities vừa extract)
+        related_updated = await self._update_related_pages(
+            user_id=user_id,
+            source_id=source_id,
+            source_name=source_name,
+            raw_text=truncated,
+            processed_paths=processed_paths,
+        )
+
+        # 5. Rebuild index + link index (rule-based, đảm bảo consistency)
         self._rebuild_index(user_id=user_id)
+        self._rebuild_link_index(user_id=user_id)
 
-        # 5. Log
+        # 6. Log
         self._repo.append_log(
             user_id=user_id,
             entry=(
                 f"## [{_now_iso()}] INGEST | {raw_category} | {source_name} | "
-                f"entities={len(entities)} topics={len(topic_items)} summaries={len(summary_items)}"
+                f"entities={len(entities)} topics={len(topic_items)} summaries={len(summary_items)} "
+                f"related_updated={related_updated}"
             ),
         )
         logger.info(
@@ -261,6 +372,7 @@ class WikiService:
             entities=len(entities),
             topics=len(topic_items),
             summaries=len(summary_items),
+            related_updated=related_updated,
         )
 
     # ── LLM calls ─────────────────────────────────────────────────────────────
@@ -380,6 +492,7 @@ class WikiService:
     async def _synthesize_page(
         self,
         *,
+        user_id: str,
         existing_content: str,
         new_text: str,
         topic_title: str,
@@ -387,7 +500,11 @@ class WikiService:
         source_name: str,
         source_id: str,
     ) -> str:
-        """Gọi LLM để merge existing wiki với nội dung mới."""
+        """Gọi LLM để merge existing wiki với nội dung mới.
+
+        Inject wiki_schema.md của user làm nguồn sự thật về quy tắc synthesis —
+        thay đổi schema file là thay đổi ngay hành vi LLM, không cần restart.
+        """
         config = get_llm_config()
         client = get_genai_client()
         prompt_template = config.prompts.wiki_synthesis_prompt
@@ -399,6 +516,9 @@ class WikiService:
         # Strip code fence từ existing_content (có thể còn sót từ LLM trước đó)
         clean_existing = _strip_code_fence(existing_content.strip()) if existing_content else ""
 
+        # Dynamic schema injection: đọc wiki_schema.md của user (Single Source of Truth)
+        schema = self._repo.read_schema(user_id=user_id)
+
         prompt = prompt_template.format(
             topic_title=topic_title,
             topic_type=topic_type or "auto",
@@ -406,6 +526,7 @@ class WikiService:
             source_id=source_id,
             existing_content=clean_existing or "(trang mới, chưa có nội dung)",
             new_text=new_text,
+            schema=schema,
         )
 
         try:
@@ -421,7 +542,7 @@ class WikiService:
             return _strip_code_fence(raw)
         except Exception as e:
             logger.warning("wiki_synthesize_failed", topic=topic_title, error=str(e))
-            return _simple_page(topic_title, source_name, source_id, new_text)
+            return _simple_page(topic_title, topic_type, source_name, source_id, new_text)
 
     async def _resynthesize_without_source(
         self,
@@ -469,6 +590,8 @@ class WikiService:
             category = page_info["category"]
             filename = page_info["filename"]
             content = self._repo.read_page(user_id=user_id, rel_path=rel_path) or ""
+            if _is_stub(content):
+                continue
             title = (
                 _parse_frontmatter_title(content)
                 or filename.replace(".md", "").replace("-", " ").title()
@@ -492,6 +615,184 @@ class WikiService:
 
         self._repo.write_index(user_id=user_id, content="\n".join(lines))
 
+    # ── Link index management ─────────────────────────────────────────────────
+
+    async def _update_link_index(
+        self, *, user_id: str, rel_path: str, new_links: list[str]
+    ) -> None:
+        """Cập nhật forward links cho 1 page. Thread-safe qua user-level lock."""
+        async with _get_link_index_lock(user_id):
+            index = self._repo.read_link_index(user_id=user_id)
+            if new_links:
+                filtered = [lp for lp in dict.fromkeys(new_links) if lp != rel_path]
+                if filtered:
+                    index[rel_path] = filtered
+                else:
+                    index.pop(rel_path, None)
+            else:
+                index.pop(rel_path, None)
+            self._repo.write_link_index(user_id=user_id, data=index)
+
+    def _rebuild_link_index(self, *, user_id: str) -> None:
+        """Rebuild toàn bộ link index từ scratch bằng cách scan tất cả pages.
+
+        Values trong index là rel_paths (không phải slugs).
+        Bỏ qua stub pages và self-links.
+        Topic/summary pages được link tường minh đến tất cả entity pages
+        có chung source_id trong frontmatter.
+        """
+        all_pages = self._repo.list_all_pages(user_id=user_id)
+
+        # Pass 1: thu thập content + links cơ bản (rel_path → list[rel_path])
+        page_contents: dict[str, str] = {}
+        index: dict[str, list[str]] = {}
+        for page_info in all_pages:
+            rel_path = page_info["rel_path"]
+            content = self._repo.read_page(user_id=user_id, rel_path=rel_path)
+            if not content or _is_stub(content):
+                continue
+            page_contents[rel_path] = content
+            links = [lp for lp in _extract_wiki_links(content) if lp != rel_path]
+            if links:
+                index[rel_path] = links
+
+        # Pass 2: build source_id → entity rel_paths map
+        source_to_entity_paths: dict[str, set[str]] = {}
+        for rel_path, content in page_contents.items():
+            if not rel_path.startswith("pages/entities/"):
+                continue
+            for src in _parse_frontmatter_sources(content):
+                source_to_entity_paths.setdefault(src, set()).add(rel_path)
+
+        # Pass 3: topic/summary pages → merge explicit entity rel_path links
+        for rel_path, content in page_contents.items():
+            category = rel_path.split("/")[1] if rel_path.count("/") >= 2 else ""
+            if category not in ("topics", "summaries"):
+                continue
+            extra: set[str] = set()
+            for src in _parse_frontmatter_sources(content):
+                extra.update(source_to_entity_paths.get(src, set()))
+            extra.discard(rel_path)  # no self-link
+            if extra:
+                existing = set(index.get(rel_path, []))
+                merged = list(dict.fromkeys(index.get(rel_path, []) + sorted(extra - existing)))
+                index[rel_path] = merged
+
+        self._repo.write_link_index(user_id=user_id, data=index)
+
+    # ── Ghost Link stubs ──────────────────────────────────────────────────────
+
+    async def _create_ghost_stubs(
+        self, *, user_id: str, content: str, source_id: str, source_name: str
+    ) -> list[str]:
+        """Tạo stub page cho [[rel_path]] chưa tồn tại trong wiki.
+
+        Giúp agent biết entity đã được nhắc đến nhưng chưa có chi tiết.
+        Stub có version=0 và stub=true trong frontmatter.
+        """
+        links = _extract_wiki_links(content)  # trả về rel_paths
+        if not links:
+            return []
+
+        existing_paths = {
+            page_info["rel_path"]
+            for page_info in self._repo.list_all_pages(user_id=user_id)
+        }
+
+        stubs_created = []
+        for link_rel_path in links:
+            if link_rel_path in existing_paths:
+                continue
+            slug = _slugify(Path(link_rel_path).stem)
+            stub_content = _stub_page(slug, source_id, source_name)
+            async with _get_page_lock(user_id, link_rel_path):
+                if not self._repo.read_page(user_id=user_id, rel_path=link_rel_path):
+                    self._repo.write_page(
+                        user_id=user_id, rel_path=link_rel_path, content=stub_content
+                    )
+                    stubs_created.append(link_rel_path)
+                    logger.info("wiki_stub_created", user_id=user_id, rel_path=link_rel_path)
+
+        return stubs_created
+
+    # ── Smart re-ingestion ────────────────────────────────────────────────────
+
+    def _score_related_page(
+        self, rel_path: str, link_index: dict[str, list[str]], user_id: str
+    ) -> tuple[int, str]:
+        """Score page để ưu tiên sort:
+        - backlink_count cao → hub page → ưu tiên cao
+        - last_updated cũ → cần làm mới → ưu tiên cao
+        Trả về tuple để sort ascending: (-backlink_count, last_updated).
+        """
+        backlink_count = sum(1 for links in link_index.values() if rel_path in links)
+        content = self._repo.read_page(user_id=user_id, rel_path=rel_path) or ""
+        last_updated = _parse_frontmatter_date(content) or "2000-01-01"
+        return (-backlink_count, last_updated)
+
+    async def _update_related_pages(
+        self,
+        *,
+        user_id: str,
+        source_id: str,
+        source_name: str,
+        raw_text: str,
+        processed_paths: set[str],
+    ) -> int:
+        """Tìm và update các pages hiện có đang link đến các entities vừa được process.
+
+        Dùng link_index.json để tra cứu hiệu quả. Sort theo hub score trước khi
+        giới hạn số lượng.
+        """
+        link_index = self._repo.read_link_index(user_id=user_id)
+        if not link_index:
+            return 0
+
+        # Tìm pages link đến ít nhất 1 entity vừa được process (dùng rel_path)
+        related: list[str] = []
+        for rel_path, links in link_index.items():
+            if rel_path in processed_paths:
+                continue
+            if any(p in links for p in processed_paths):
+                related.append(rel_path)
+
+        if not related:
+            return 0
+
+        # Sort: hub pages (nhiều backlinks) trước, pages cũ trước
+        related.sort(key=lambda p: self._score_related_page(p, link_index, user_id))
+        related = related[: self._settings.wiki_max_related_pages_per_source]
+
+        updated = 0
+        for rel_path in related:
+            existing = self._repo.read_page(user_id=user_id, rel_path=rel_path) or ""
+            topic_title = _parse_frontmatter_title(existing) or rel_path
+            category = rel_path.split("/")[1]  # entities|topics|summaries
+
+            async with _get_page_lock(user_id, rel_path):
+                new_content = await self._synthesize_page(
+                    user_id=user_id,
+                    existing_content=existing,
+                    new_text=raw_text,
+                    topic_title=topic_title,
+                    topic_type=category,
+                    source_name=source_name,
+                    source_id=source_id,
+                )
+                if new_content:
+                    self._repo.write_page(
+                        user_id=user_id, rel_path=rel_path, content=new_content
+                    )
+                    await self._update_link_index(
+                        user_id=user_id,
+                        rel_path=rel_path,
+                        new_links=_extract_wiki_links(new_content),
+                    )
+                    logger.info("wiki_related_page_updated", user_id=user_id, path=rel_path)
+            updated += 1
+
+        return updated
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -511,13 +812,17 @@ def _strip_code_fence(text: str) -> str:
 
 
 def _slugify(text: str) -> str:
-    """Normalize text thành kebab-case slug, tối đa 60 ký tự."""
+    """Normalize text thành slug chỉ gồm [a-z0-9], tối đa 60 ký tự.
+
+    Không dùng dấu gạch ngang để tránh trùng lặp thực thể:
+    "u-net" và "unet" → cùng slug "unet",
+    "anno-ddpm" và "anoddpm" → cùng slug "annoddpm".
+    """
     # Bỏ dấu tiếng Việt
     normalized = unicodedata.normalize("NFD", text)
     ascii_text = "".join(c for c in normalized if unicodedata.category(c) != "Mn")
-    # Lowercase, replace non-alphanumeric bằng dấu gạch ngang
-    slug = re.sub(r"[^a-z0-9]+", "-", ascii_text.lower()).strip("-")
-    return slug[:60]
+    # Lowercase, bỏ tất cả ký tự không phải a-z0-9
+    return re.sub(r"[^a-z0-9]", "", ascii_text.lower())[:60]
 
 
 def _parse_frontmatter(content: str) -> str:
@@ -538,6 +843,14 @@ def _parse_frontmatter_title(content: str) -> str:
     return ""
 
 
+def _is_stub(content: str) -> bool:
+    """Trả về True nếu page là stub (stub: true trong frontmatter)."""
+    fm = _parse_frontmatter(content)
+    if fm:
+        return bool(re.search(r"^stub:\s*true\s*$", fm, re.MULTILINE))
+    return False
+
+
 def _parse_frontmatter_sources(content: str) -> list[str]:
     """Lấy sources list từ YAML frontmatter.
 
@@ -554,6 +867,72 @@ def _parse_frontmatter_sources(content: str) -> list[str]:
         raw = sources_match.group(1)
         return [s.strip().strip("\"'") for s in raw.split(",") if s.strip()]
     return []
+
+
+def _normalize_wiki_link(raw: str) -> str:
+    """Chuẩn hóa nội dung [[...]] thành rel_path chuẩn.
+
+    [[pages/entities/AdamW.md]]  → "pages/entities/adamw.md"  (slugify stem only)
+    [[pages/topics/Foo Bar.md]]  → "pages/topics/foobar.md"
+    [[adamw]]                    → "pages/entities/adamw.md"   (backward compat)
+    """
+    raw = raw.strip()
+    if "/" in raw:
+        # Đã có path prefix: chỉ slugify phần filename stem
+        prefix, filename = raw.rsplit("/", 1)
+        stem = filename[:-3] if filename.endswith(".md") else filename
+        slug = _slugify(stem)
+        return f"{prefix}/{slug}.md" if slug else ""
+    else:
+        # Plain slug (backward compat): mặc định category entities
+        slug = _slugify(raw)
+        return f"pages/entities/{slug}.md" if slug else ""
+
+
+def _extract_wiki_links(content: str) -> list[str]:
+    """Extract [[...]] refs từ wiki page content, trả về rel_paths đã chuẩn hóa.
+
+    Slugify CHỈ áp dụng cho phần filename stem, không áp dụng lên toàn bộ path.
+    Dedup nhưng giữ thứ tự xuất hiện đầu tiên.
+    """
+    seen: set[str] = set()
+    result = []
+    for raw in _WIKI_LINK_RE.findall(content):
+        rel_path = _normalize_wiki_link(raw)
+        if rel_path and rel_path not in seen:
+            seen.add(rel_path)
+            result.append(rel_path)
+    return result
+
+
+def _parse_frontmatter_date(content: str) -> str:
+    """Lấy last_updated từ YAML frontmatter. Trả về "" nếu không có."""
+    fm = _parse_frontmatter(content)
+    if fm:
+        match = re.search(r"^last_updated:\s*(.+)$", fm, re.MULTILINE)
+        if match:
+            return match.group(1).strip()
+    return ""
+
+
+def _stub_page(slug: str, source_id: str, source_name: str) -> str:
+    """Tạo minimal stub page cho entity chưa có trang chi tiết."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    title = slug.replace("-", " ").title()
+    return (
+        f"---\n"
+        f"title: {title}\n"
+        f"tags: []\n"
+        f"type: concept\n"
+        f"sources: [{source_id}]\n"
+        f"last_updated: {today}\n"
+        f"version: 0\n"
+        f"stub: true\n"
+        f"---\n\n"
+        f"# {title}\n\n"
+        f"> **Stub page** — Thực thể này được nhắc đến trong [{source_name}] nhưng chưa có trang chi tiết.\n"
+        f"> Trang này sẽ được tự động làm giàu khi có thêm tài liệu liên quan.\n"
+    )
 
 
 def _now_iso() -> str:

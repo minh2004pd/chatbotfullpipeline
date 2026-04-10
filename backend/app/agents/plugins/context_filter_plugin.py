@@ -30,18 +30,39 @@ from app.utils.gemini_utils import _with_retry, get_genai_client
 logger = structlog.get_logger(__name__)
 
 
+def _is_tool_loop_call(contents: list) -> bool:
+    """True nếu đây là model call trung gian trong vòng lặp tool-use.
+
+    ADK gọi before_model_callback trước MỌI lần model call — kể cả intermediate calls
+    khi agent đang xử lý function_response. Nhận biết qua content cuối có function_response parts.
+    """
+    if not contents:
+        return False
+    last = contents[-1]
+    if not last.parts:
+        return False
+    return any(getattr(p, "function_response", None) is not None for p in last.parts)
+
+
 async def context_filter_before_model(
     callback_context: CallbackContext,
     llm_request: LlmRequest,
 ) -> LlmResponse | None:
     """Callback chạy trước khi gọi LLM. Tự động tóm tắt context nếu quá dài."""
     settings = get_settings()
-    max_ctx: int = callback_context.state.get("max_context_messages", settings.max_context_messages)
+    max_ctx: int = int(callback_context.state.get("max_context_messages", settings.max_context_messages))
 
     contents = llm_request.contents or []
     n = len(contents)
 
     if n <= max_ctx:
+        return None
+
+    # Trong vòng lặp tool-use: bỏ qua summarization, chỉ truncate thô nếu cần
+    # Summarization chỉ chạy khi bắt đầu user turn mới (không phải giữa tool loop)
+    if _is_tool_loop_call(contents):
+        if n > max_ctx:
+            llm_request.contents = contents[-max_ctx:]
         return None
 
     existing_summary: str = callback_context.state.get("conversation_summary", "")

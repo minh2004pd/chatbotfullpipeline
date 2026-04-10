@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { FileText, Trash2, RefreshCw, Loader2, AlertCircle, Layers } from 'lucide-react'
+import { FileText, Trash2, RefreshCw, Loader2, AlertCircle, Layers, CheckCircle2 } from 'lucide-react'
 import { useDocuments } from '@/hooks/useDocuments'
 import UploadZone from './UploadZone'
 import type { UploadProgress } from '@/types'
@@ -33,9 +33,7 @@ export default function DocumentPanel() {
   }
 
   const uploadingEntries = Object.entries(uploadProgresses)
-  const isAnyUploading = uploadingEntries.some(
-    ([, p]) => p.status === 'uploading',
-  )
+  const isAnyUploading = uploadingEntries.some(([, p]) => p.status === 'uploading')
 
   return (
     <div className="space-y-2">
@@ -129,27 +127,62 @@ export default function DocumentPanel() {
 }
 
 function UploadProgressRow({ progress }: { progress: UploadProgress }) {
+  const isUploading = progress.status === 'uploading'
+  const isPostUpload = ['rag_done', 'wiki_processing', 'done', 'error'].includes(progress.status)
+  const isWikiDone = progress.status === 'done'
   const isError = progress.status === 'error'
-  const isDone = progress.status === 'done'
 
   return (
-    <div className="px-2.5 py-2 bg-[#111] border border-[#1e1e1e] rounded-lg">
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-[10px] text-[#a0a0a0] truncate flex-1 pr-2">
-          {progress.filename}
-        </span>
-        <span className="text-[10px] text-[#555] flex-shrink-0">
-          {isError ? 'Error' : isDone ? 'Done' : `${progress.progress}%`}
-        </span>
-      </div>
-      <div className="w-full h-0.5 bg-[#2a2a2a] rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all duration-200 ${
-            isError ? 'bg-red-500' : isDone ? 'bg-green-500' : 'bg-violet-500'
-          }`}
-          style={{ width: `${progress.progress}%` }}
-        />
-      </div>
+    <div className="px-2.5 py-2 bg-[#111] border border-[#1e1e1e] rounded-lg space-y-1.5">
+      {/* Filename */}
+      <p className="text-[10px] text-[#a0a0a0] truncate">{progress.filename}</p>
+
+      {/* Stage: file upload progress */}
+      {isUploading && (
+        <div className="flex items-center gap-2">
+          <div className="flex-1 h-0.5 bg-[#2a2a2a] rounded-full overflow-hidden">
+            <div
+              className="h-full bg-violet-500 rounded-full transition-all duration-200"
+              style={{ width: `${progress.progress}%` }}
+            />
+          </div>
+          <span className="text-[9px] text-[#555] flex-shrink-0">{progress.progress}%</span>
+        </div>
+      )}
+
+      {/* Stages: RAG + Wiki (post-upload) */}
+      {isPostUpload && (
+        <div className="space-y-1">
+          {/* RAG — luôn done khi đến đây */}
+          <div className="flex items-center gap-1.5">
+            <CheckCircle2 size={9} className="text-green-500 flex-shrink-0" />
+            <span className="text-[9px] text-[#555]">
+              RAG index
+              {progress.chunkCount != null && (
+                <span className="text-[#444]"> — {progress.chunkCount} chunks</span>
+              )}
+            </span>
+          </div>
+
+          {/* Wiki */}
+          <div className="flex items-center gap-1.5">
+            {isWikiDone ? (
+              <CheckCircle2 size={9} className="text-green-500 flex-shrink-0" />
+            ) : isError ? (
+              <AlertCircle size={9} className="text-red-400 flex-shrink-0" />
+            ) : (
+              <Loader2 size={9} className="text-violet-400 animate-spin flex-shrink-0" />
+            )}
+            <span
+              className={`text-[9px] ${
+                isError ? 'text-red-400' : isWikiDone ? 'text-[#555]' : 'text-violet-400'
+              }`}
+            >
+              {isWikiDone ? 'Wiki index' : isError ? 'Wiki — lỗi' : 'Wiki đang xây dựng...'}
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

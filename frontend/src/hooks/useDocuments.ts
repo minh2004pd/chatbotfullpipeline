@@ -6,6 +6,9 @@ import { useState, useCallback } from 'react'
 
 export const DOCUMENTS_QUERY_KEY = ['documents']
 
+const POLL_INTERVAL_MS = 2000
+const MAX_POLLS = 90  // 3 phút tối đa
+
 export function useDocuments() {
   const queryClient = useQueryClient()
   const { addToast, userId } = useChatStore()
@@ -30,6 +33,72 @@ export function useDocuments() {
     },
   })
 
+  const scheduleRemove = useCallback((tempId: string, delayMs = 3000) => {
+    setTimeout(() => {
+      setUploadProgresses((prev) => {
+        const next = { ...prev }
+        delete next[tempId]
+        return next
+      })
+    }, delayMs)
+  }, [])
+
+  const pollWikiStatus = useCallback(
+    (tempId: string, documentId: string) => {
+      let polls = 0
+
+      const tick = async () => {
+        if (polls++ >= MAX_POLLS) {
+          // Timeout — server quá chậm hoặc đã restart, treat as done
+          setUploadProgresses((prev) => {
+            const entry = prev[tempId]
+            if (!entry) return prev
+            return { ...prev, [tempId]: { ...entry, status: 'done' } }
+          })
+          scheduleRemove(tempId)
+          void queryClient.invalidateQueries({ queryKey: DOCUMENTS_QUERY_KEY })
+          return
+        }
+
+        try {
+          const { wiki } = await documentsApi.getIndexingStatus(documentId)
+
+          if (wiki === 'done' || wiki === 'disabled') {
+            setUploadProgresses((prev) => {
+              const entry = prev[tempId]
+              if (!entry) return prev
+              return { ...prev, [tempId]: { ...entry, status: 'done' } }
+            })
+            scheduleRemove(tempId)
+            void queryClient.invalidateQueries({ queryKey: DOCUMENTS_QUERY_KEY })
+          } else if (wiki === 'error') {
+            setUploadProgresses((prev) => {
+              const entry = prev[tempId]
+              if (!entry) return prev
+              return { ...prev, [tempId]: { ...entry, status: 'error', error: 'Wiki indexing failed' } }
+            })
+            scheduleRemove(tempId, 5000)
+          } else {
+            // "processing" — tiếp tục poll
+            setTimeout(() => void tick(), POLL_INTERVAL_MS)
+          }
+        } catch {
+          // Lỗi mạng hoặc server — treat as done để không block UI mãi
+          setUploadProgresses((prev) => {
+            const entry = prev[tempId]
+            if (!entry) return prev
+            return { ...prev, [tempId]: { ...entry, status: 'done' } }
+          })
+          scheduleRemove(tempId)
+        }
+      }
+
+      // Poll đầu tiên sau 1.5s (để wiki task kịp start)
+      setTimeout(() => void tick(), 1500)
+    },
+    [queryClient, scheduleRemove],
+  )
+
   const uploadFile = useCallback(
     async (file: File): Promise<void> => {
       const tempId = crypto.randomUUID()
@@ -40,29 +109,29 @@ export function useDocuments() {
       }))
 
       try {
-        await documentsApi.upload(file, (progress) => {
+        const result = await documentsApi.upload(file, (progress) => {
           setUploadProgresses((prev) => ({
             ...prev,
             [tempId]: { ...prev[tempId], progress },
           }))
         })
 
+        // RAG xong (synchronous) — chuyển sang giai đoạn wiki
         setUploadProgresses((prev) => ({
           ...prev,
-          [tempId]: { ...prev[tempId], progress: 100, status: 'done' },
+          [tempId]: {
+            ...prev[tempId],
+            progress: 100,
+            status: 'rag_done',
+            documentId: result.document_id,
+            chunkCount: result.chunk_count,
+          },
         }))
 
-        void queryClient.invalidateQueries({ queryKey: DOCUMENTS_QUERY_KEY })
         addToast({ type: 'success', message: `"${file.name}" uploaded successfully.` })
 
-        // Remove progress entry after a delay
-        setTimeout(() => {
-          setUploadProgresses((prev) => {
-            const next = { ...prev }
-            delete next[tempId]
-            return next
-          })
-        }, 2000)
+        // Bắt đầu poll wiki status
+        pollWikiStatus(tempId, result.document_id)
       } catch {
         setUploadProgresses((prev) => ({
           ...prev,
@@ -73,9 +142,10 @@ export function useDocuments() {
           },
         }))
         addToast({ type: 'error', message: `Failed to upload "${file.name}".` })
+        scheduleRemove(tempId, 5000)
       }
     },
-    [queryClient, addToast],
+    [addToast, pollWikiStatus, scheduleRemove],
   )
 
   return {

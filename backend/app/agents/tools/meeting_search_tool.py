@@ -72,10 +72,13 @@ def list_meetings(tool_context: ToolContext) -> dict:
 
 def search_meeting_transcripts(query: str, tool_context: ToolContext) -> str:
     """
-    Tìm kiếm trong transcript các cuộc họp đã được ghi âm và dừng ghi.
+    Tìm kiếm trong transcript các cuộc họp đã được ghi âm và dừng ghi (RAG).
 
-    Dùng khi người dùng hỏi về: nội dung cuộc họp, ai nói gì, quyết định được đưa ra,
-    action items, cam kết, tóm tắt meeting. Không dùng cho tài liệu PDF/file đã upload.
+    ⚠️ FALLBACK TOOL — CHỈ gọi tool này SAU KHI đã gọi read_wiki_index và xác định wiki
+    không đủ thông tin cần thiết. KHÔNG bao giờ gọi trước read_wiki_index.
+
+    Dùng khi cần: nội dung cuộc họp, ai nói gì, quyết định, action items, cam kết.
+    Không dùng cho tài liệu PDF/file đã upload.
     Chỉ có dữ liệu sau khi user bấm dừng ghi — transcript realtime chưa tồn tại.
 
     Query nên là cụm từ khóa về chủ đề hoặc người nói, không phải câu hỏi nguyên văn.

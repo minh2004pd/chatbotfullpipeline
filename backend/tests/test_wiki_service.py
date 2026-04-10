@@ -7,6 +7,9 @@ import pytest
 from app.repositories.wiki_repo import WikiRepository
 from app.services.wiki_service import (
     WikiService,
+    _extract_wiki_links,
+    _is_stub,
+    _normalize_wiki_link,
     _parse_frontmatter_sources,
     _parse_frontmatter_title,
     _slugify,
@@ -47,11 +50,12 @@ USER = "user_test"
 
 
 def test_slugify_basic():
-    assert _slugify("Q1 Planning 2026") == "q1-planning-2026"
+    # Slug chỉ dùng [a-z0-9], không có gạch ngang
+    assert _slugify("Q1 Planning 2026") == "q1planning2026"
 
 
 def test_slugify_vietnamese():
-    assert _slugify("Dự án MemRAG") == "du-an-memrag"
+    assert _slugify("Dự án MemRAG") == "duanmemrag"
 
 
 def test_slugify_max_length():
@@ -61,7 +65,15 @@ def test_slugify_max_length():
 
 
 def test_slugify_special_chars():
-    assert _slugify("Hello, World! @2026") == "hello-world-2026"
+    # Gạch ngang và ký tự đặc biệt bị bỏ để tránh trùng lặp (u-net = unet)
+    assert _slugify("Hello, World! @2026") == "helloworld2026"
+
+
+def test_slugify_dedup():
+    # Mục tiêu chính: u-net và unet → cùng slug
+    assert _slugify("u-net") == _slugify("unet") == "unet"
+    assert _slugify("anno-ddpm") == _slugify("annoddpm") == "annoddpm"
+    assert _slugify("GPT-4o") == _slugify("gpt4o") == "gpt4o"
 
 
 def test_parse_frontmatter_title_found():
@@ -149,7 +161,8 @@ async def test_extract_topics_preserves_entity_type(service):
     assert len(entities) == 2
     lora = next(e for e in entities if e["slug"] == "lora")
     assert lora["type"] == "method", "type phải được giữ lại từ LLM output"
-    gpt = next(e for e in entities if e["slug"] == "gpt-4o")
+    # "gpt-4o" từ LLM → _slugify → "gpt4o" (không có gạch ngang)
+    gpt = next(e for e in entities if e["slug"] == "gpt4o")
     assert gpt["type"] == "model"
 
 
@@ -431,3 +444,207 @@ async def test_update_wiki_appends_log_entry(service, repo):
     log_content = (Path(repo._base_dir) / USER / "log.md").read_text()
     assert "INGEST" in log_content
     assert "doc.pdf" in log_content
+
+
+# ── _normalize_wiki_link ──────────────────────────────────────────────────────
+
+
+def test_normalize_wiki_link_full_path():
+    assert _normalize_wiki_link("pages/entities/adamw.md") == "pages/entities/adamw.md"
+
+
+def test_normalize_wiki_link_full_path_uppercase_stem():
+    """Slugify chỉ áp dụng cho stem, không cho prefix."""
+    assert _normalize_wiki_link("pages/entities/AdamW.md") == "pages/entities/adamw.md"
+
+
+def test_normalize_wiki_link_full_path_no_extension():
+    assert _normalize_wiki_link("pages/entities/AdamW") == "pages/entities/adamw.md"
+
+
+def test_normalize_wiki_link_topic_path():
+    assert _normalize_wiki_link("pages/topics/EfficientML.md") == "pages/topics/efficientml.md"
+
+
+def test_normalize_wiki_link_plain_slug_defaults_to_entities():
+    """[[slug]] không có path → backward compat, mặc định entities."""
+    assert _normalize_wiki_link("adamw") == "pages/entities/adamw.md"
+
+
+def test_normalize_wiki_link_plain_slug_with_dash():
+    assert _normalize_wiki_link("u-net") == "pages/entities/unet.md"
+
+
+def test_normalize_wiki_link_empty_stem_returns_empty():
+    assert _normalize_wiki_link("pages/entities/---") == ""
+
+
+# ── _extract_wiki_links (trả rel_paths) ──────────────────────────────────────
+
+
+def test_extract_wiki_links_returns_rel_paths():
+    content = "Dùng [[pages/entities/lora.md]] và [[pages/entities/qlora.md]]"
+    assert _extract_wiki_links(content) == ["pages/entities/lora.md", "pages/entities/qlora.md"]
+
+
+def test_extract_wiki_links_backward_compat_plain_slug():
+    content = "Dùng [[lora]] và [[qlora]]"
+    assert _extract_wiki_links(content) == [
+        "pages/entities/lora.md",
+        "pages/entities/qlora.md",
+    ]
+
+
+def test_extract_wiki_links_dedup():
+    content = "[[pages/entities/unet.md]] rồi lại [[pages/entities/unet.md]] và [[pages/entities/UNet.md]]"
+    result = _extract_wiki_links(content)
+    assert result == ["pages/entities/unet.md"]
+
+
+def test_extract_wiki_links_no_links():
+    assert _extract_wiki_links("Không có link nào") == []
+
+
+def test_extract_wiki_links_mixed_formats():
+    """Plain slug và full path trong cùng nội dung."""
+    content = "[[pages/entities/ddpm.md]] và [[unet]]"
+    assert _extract_wiki_links(content) == [
+        "pages/entities/ddpm.md",
+        "pages/entities/unet.md",
+    ]
+
+
+# ── _is_stub ──────────────────────────────────────────────────────────────────
+
+
+def test_is_stub_true():
+    content = "---\ntitle: Foo\nstub: true\nversion: 0\n---\n\n# Foo"
+    assert _is_stub(content) is True
+
+
+def test_is_stub_false_normal_page():
+    content = "---\ntitle: Foo\nversion: 1\n---\n\n# Foo"
+    assert _is_stub(content) is False
+
+
+def test_is_stub_false_no_frontmatter():
+    assert _is_stub("# Just content") is False
+
+
+# ── _rebuild_link_index (self-link, stub filter, rel_path values) ─────────────
+
+
+def test_rebuild_link_index_stores_rel_paths(service, repo):
+    """link_index values phải là rel_paths, không phải slugs."""
+    repo.ensure_wiki_structure(user_id=USER)
+    entity_content = (
+        "---\ntitle: LoRA\nsources: [doc-1]\nversion: 1\n---\n\n"
+        "Dùng [[pages/entities/ddpm.md]] và [[pages/entities/unet.md]]"
+    )
+    repo.write_page(user_id=USER, rel_path="pages/entities/lora.md", content=entity_content)
+
+    service._rebuild_link_index(user_id=USER)
+    index = repo.read_link_index(user_id=USER)
+
+    assert "pages/entities/lora.md" in index
+    links = index["pages/entities/lora.md"]
+    assert "pages/entities/ddpm.md" in links
+    assert "pages/entities/unet.md" in links
+
+
+def test_rebuild_link_index_no_self_link(service, repo):
+    """Page không được tự link đến chính nó."""
+    repo.ensure_wiki_structure(user_id=USER)
+    content = (
+        "---\ntitle: UNet\nsources: [doc-1]\nversion: 1\n---\n\n"
+        "[[pages/entities/unet.md]] là kiến trúc encoder-decoder. Dùng với [[pages/entities/ddpm.md]]"
+    )
+    repo.write_page(user_id=USER, rel_path="pages/entities/unet.md", content=content)
+
+    service._rebuild_link_index(user_id=USER)
+    index = repo.read_link_index(user_id=USER)
+
+    links = index.get("pages/entities/unet.md", [])
+    assert "pages/entities/unet.md" not in links
+    assert "pages/entities/ddpm.md" in links
+
+
+def test_rebuild_link_index_excludes_stubs(service, repo):
+    """Stub pages không xuất hiện trong link_index keys."""
+    repo.ensure_wiki_structure(user_id=USER)
+    stub_content = (
+        "---\ntitle: Foo\nstub: true\nversion: 0\n---\n\n"
+        "[[pages/entities/bar.md]]"
+    )
+    repo.write_page(user_id=USER, rel_path="pages/entities/foo.md", content=stub_content)
+
+    service._rebuild_link_index(user_id=USER)
+    index = repo.read_link_index(user_id=USER)
+
+    assert "pages/entities/foo.md" not in index
+
+
+def test_rebuild_link_index_topic_links_entities(service, repo):
+    """Topic page được explicit link đến entity pages có chung source_id."""
+    repo.ensure_wiki_structure(user_id=USER)
+    entity_content = (
+        "---\ntitle: LoRA\nsources: [doc-1]\nversion: 1\n---\n\n# LoRA"
+    )
+    topic_content = (
+        "---\ntitle: Efficient ML\nsources: [doc-1]\nversion: 1\n---\n\n# Efficient ML"
+    )
+    repo.write_page(user_id=USER, rel_path="pages/entities/lora.md", content=entity_content)
+    repo.write_page(user_id=USER, rel_path="pages/topics/efficientml.md", content=topic_content)
+
+    service._rebuild_link_index(user_id=USER)
+    index = repo.read_link_index(user_id=USER)
+
+    # Topic phải link đến entity cùng source
+    links = index.get("pages/topics/efficientml.md", [])
+    assert "pages/entities/lora.md" in links
+
+
+# ── backlinks via read_wiki_page tool ────────────────────────────────────────
+
+
+def test_read_wiki_page_backlinks_use_rel_path(repo):
+    """Backlinks được tính theo rel_path, không phải slug."""
+    from unittest.mock import MagicMock
+
+    from app.agents.tools.wiki_tools import read_wiki_page
+
+    repo.ensure_wiki_structure(user_id=USER)
+    target = "---\ntitle: DDPM\nsources: [doc-1]\nversion: 1\n---\n\n# DDPM"
+    repo.write_page(user_id=USER, rel_path="pages/entities/ddpm.md", content=target)
+
+    # Link index: unet.md → [pages/entities/ddpm.md]
+    repo.write_link_index(
+        user_id=USER,
+        data={"pages/entities/unet.md": ["pages/entities/ddpm.md"]},
+    )
+
+    tool_context = MagicMock()
+    tool_context.state = {"user_id": USER}
+
+    with patch("app.agents.tools.wiki_tools._repo", return_value=repo):
+        result = read_wiki_page("pages/entities/ddpm.md", tool_context)
+
+    assert result["found"] is True
+    assert "pages/entities/unet.md" in result["backlinks"]
+
+
+# ── _rebuild_index excludes stubs ─────────────────────────────────────────────
+
+
+def test_rebuild_index_excludes_stubs(service, repo):
+    """Stub pages không xuất hiện trong index.md."""
+    stub = "---\ntitle: Foo\nstub: true\nversion: 0\n---\n\n# Foo"
+    normal = "---\ntitle: Bar\nversion: 1\n---\n\n# Bar"
+    repo.write_page(user_id=USER, rel_path="pages/entities/foo.md", content=stub)
+    repo.write_page(user_id=USER, rel_path="pages/entities/bar.md", content=normal)
+
+    service._rebuild_index(user_id=USER)
+    index = repo.read_index(user_id=USER)
+
+    assert "pages/entities/foo.md" not in index
+    assert "pages/entities/bar.md" in index

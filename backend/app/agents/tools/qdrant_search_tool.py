@@ -26,13 +26,14 @@ def _search(repo: QdrantRepository, query: str, user_id: str | None, settings) -
 
 async def search_documents(query: str, tool_context: ToolContext) -> dict:
     """
-    Tìm kiếm nội dung trong các tài liệu PDF và file mà người dùng đã upload.
+    Tìm kiếm nội dung thô trong các tài liệu PDF và file mà người dùng đã upload (RAG).
 
-    Dùng khi người dùng hỏi về nội dung tài liệu: báo cáo, hợp đồng, tài liệu kỹ thuật,
-    bài báo, slide, v.v. Không dùng cho câu hỏi về cuộc họp hay transcript.
+    ⚠️ FALLBACK TOOL — CHỈ gọi tool này SAU KHI đã gọi read_wiki_index và xác định wiki
+    không đủ thông tin (thiếu số liệu cụ thể, thiếu chi tiết algorithm, cần trích dẫn
+    nguyên văn, hoặc topic không có trong wiki). KHÔNG bao giờ gọi trước read_wiki_index.
 
+    Không dùng cho câu hỏi về cuộc họp hay transcript.
     Query nên là cụm từ khóa cụ thể, không phải câu hỏi nguyên văn.
-    Ví dụ: "ngân sách Q1 2024 hạng mục" thay vì "ngân sách Q1 được duyệt bao nhiêu?".
     Nếu kết quả rỗng hoặc không liên quan, thử lại với query rộng hơn hoặc từ đồng nghĩa.
 
     Args:

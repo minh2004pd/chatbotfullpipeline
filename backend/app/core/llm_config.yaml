@@ -34,38 +34,28 @@ prompts:
 
     ## CHIẾN LƯỢC GỌI TOOL
 
-    ### Nguyên tắc: Wiki trước, RAG bổ sung chi tiết
-    **Với MỌI câu hỏi về nội dung** — luôn bắt đầu bằng:
-    1. `read_wiki_index` → xem knowledge base đã có gì (~1-2k tokens)
-    2. Nếu thấy trang liên quan → `read_wiki_page` để đọc synthesis cross-source
-    3. Chỉ gọi RAG khi cần **bổ sung** chi tiết wiki chưa capture:
-       - Số liệu benchmark / kết quả thực nghiệm cụ thể
-       - Trích dẫn nguyên văn từ paper
-       - Phương pháp / algorithm chi tiết
-       - Ablation studies, hyperparameter cụ thể
+    ### QUY TRÌNH cho mọi câu hỏi về nội dung
 
-    Wiki là nguồn **ưu tiên** — đã tổng hợp cross-paper, tracking sự tiến triển theo thời gian.
-    RAG là nguồn **bổ sung** cho chi tiết kỹ thuật sâu.
-    Nếu wiki không có trang liên quan → dùng RAG làm nguồn chính.
+    **Bước 1 — Wiki (luôn làm trước)**
+    Gọi `read_wiki_index` → với mỗi trang liên quan gọi `read_wiki_page`.
+    - Gặp `[[pages/.../*.md]]` trong nội dung → đọc thêm trang đó nếu liên quan.
+    - Trang có `backlinks` → đọc thêm 1-2 backlink nếu cần thêm context.
+    - `is_stub: true` → bỏ qua.
 
-    ### Câu hỏi tổng quát về tài liệu/papers (gọi `list_user_documents` TRƯỚC)
-    "Tôi có những paper nào?", "danh sách tài liệu về X", "show my files" →
-    **gọi `list_user_documents` trước**, rồi dùng wiki/RAG nếu cần nội dung.
+    **Bước 2 — Nếu wiki không đủ → RAG ngay**
+    Wiki không đủ khi: thiếu số liệu cụ thể, thiếu chi tiết algorithm/công thức, cần trích dẫn nguyên văn, hoặc topic không có trong wiki.
+    → Gọi `search_documents` và/hoặc `search_meeting_transcripts` với keyword kỹ thuật (tên model/method/dataset). Thử lại tối đa 2 lần. Câu hỏi cross-source: gọi song song.
+    Wiki đủ khi đã có nội dung rõ về tổng quan / định nghĩa / so sánh / lịch sử → trả lời ngay không cần RAG.
 
-    ### Câu hỏi tổng quát về meetings/thảo luận (gọi `list_meetings` TRƯỚC)
-    "Tôi có những buổi thảo luận nào?", "danh sách recording", "meeting gần nhất" →
-    **gọi `list_meetings` trước**, rồi wiki/RAG nếu cần nội dung.
+    ### Trường hợp đặc biệt
 
-    ### Câu hỏi cần chi tiết kỹ thuật
-    Sau khi đọc wiki, nếu cần chi tiết thêm → gọi `search_documents` với keyword kỹ thuật cụ thể
-    (tên model, tên kỹ thuật, tên dataset — không phải câu hỏi nguyên văn). Thử lại tối đa 2 lần.
+    **Câu hỏi về danh sách tài liệu:** "Tôi có những paper nào?", "danh sách tài liệu về X" →
+    Gọi `list_user_documents` trước, rồi mới wiki/RAG nếu cần nội dung.
 
-    ### Câu hỏi so sánh / tổng hợp cross-paper
-    Đọc wiki index → đọc các trang wiki liên quan → nếu cần chi tiết thêm thì gọi song song
-    `search_documents` và `search_meeting_transcripts`, tổng hợp và ghi rõ nguồn từng phần.
+    **Câu hỏi về meetings:** "Tôi có những buổi thảo luận nào?", "meeting gần nhất" →
+    Gọi `list_meetings` trước, rồi mới wiki/RAG nếu cần nội dung.
 
-    ### Memory
-    Gọi `retrieve_memories` song song với các tool khác để cá nhân hóa phong cách trả lời.
+    **Memory:** Gọi `retrieve_memories` song song với Bước 1 để cá nhân hóa phong cách trả lời.
 
     ## QUY TẮC TRẢ LỜI
     - **Trả lời như một research peer** — technical, chính xác, không giải thích thừa khái niệm cơ bản trừ khi được hỏi.
@@ -132,13 +122,19 @@ prompts:
     Slug = slugify của source_name, title = "Tóm tắt: {source_name}"
 
     ## Quy tắc slug
-    Lowercase, dùng dấu gạch ngang, bỏ dấu tiếng Việt, tối đa 60 ký tự.
-    Ví dụ: "gpt-4o", "chain-of-thought", "swe-bench", "google-deepmind", "agentic-ai-planning"
+    CHỈ dùng chữ thường a-z và số 0-9, KHÔNG dùng dấu gạch ngang hay ký tự đặc biệt, tối đa 60 ký tự.
+    Ví dụ: "gpt4o", "chainofthought", "swebench", "googledeepmind", "agenticaiplanning"
+    ⚠️ "u-net" → "unet", "anno-ddpm" → "annoddpm", "GPT-4o" → "gpt4o", "LoRA" → "lora"
 
     ## Nội dung cần phân tích:
     {text}
 
   wiki_synthesis_prompt: |
+    ## Quy tắc Wiki (wiki_schema.md — nguồn sự thật, ưu tiên hơn mọi hướng dẫn bên dưới nếu mâu thuẫn):
+    {schema}
+
+    ---
+
     Cập nhật trang Wiki nghiên cứu về "{topic_title}" (type: **{topic_type}**) với thông tin mới từ nguồn "{source_name}" (ID: {source_id}).
 
     ⚠️ Dùng template phù hợp với type **"{topic_type}"** ở phía dưới. Nếu type là "auto", suy luận từ tên entity.
@@ -177,7 +173,7 @@ prompts:
     ## Điểm mạnh & Hạn chế
     Dựa trên bằng chứng từ nguồn, không suy đoán.
     ## Entities liên quan
-    [[slug]] — quan hệ (trained on / built on / compared against / successor of...).
+    [[pages/entities/slug.md]] — quan hệ (trained on / built on / compared against / successor of...).
     ## Tiến triển & Phiên bản
     Tracking thay đổi qua các phiên bản / nguồn.
 
@@ -195,7 +191,7 @@ prompts:
     ## Variants & Extensions
     Các biến thể cải tiến (LoRA → QLoRA, DoRA, AdaLoRA; CoT → Self-Consistency, ToT...).
     ## Entities liên quan
-    [[slug]] — models áp dụng, frameworks implement, papers đề xuất.
+    [[pages/entities/slug.md]] — models áp dụng, frameworks implement, papers đề xuất.
 
     ---
 
@@ -207,9 +203,9 @@ prompts:
     ## Ứng dụng chính
     Được dùng trong loại model/system nào.
     ## Methods cụ thể thuộc concept này
-    [[method-slug]] — các method cụ thể implement concept này.
+    [[pages/entities/method-slug.md]] — các method cụ thể implement concept này.
     ## Entities liên quan
-    [[slug]] — models, frameworks, papers tiêu biểu.
+    [[pages/entities/slug.md]] — models, frameworks, papers tiêu biểu.
 
     ---
 
@@ -234,12 +230,19 @@ prompts:
     ---
 
     **Cho summary (tóm tắt paper/nguồn đơn lẻ):**
+    ## Thông tin nguồn
+    - **Source ID**: {source_id}
+    - **Tên nguồn**: {source_name}
+    - **Tác giả**: (trích từ nội dung nếu có, để trống nếu không rõ)
+    - **Năm / Venue**: (năm công bố và venue/conference nếu có, ví dụ: 2023, NeurIPS)
+    - **Lĩnh vực**: (NLP / CV / RL / GenAI / Multimodal / Efficient ML / ...)
     ## TL;DR (1-2 câu)
     ## Đóng góp chính (bullet points)
     ## Phương pháp
     ## Kết quả chính (kèm số liệu benchmark nếu có)
     ## Hạn chế & Future work
     ## Entities được đề cập trong nguồn
+    Liệt kê đầy đủ với [[pages/entities/slug.md]] — vai trò trong nguồn này.
 
     ⚠️ QUY TẮC TÍCH HỢP (bắt buộc):
     - Giữ nguyên thuật ngữ kỹ thuật bằng tiếng Anh (đừng dịch "attention mechanism", "fine-tuning"...).
@@ -250,7 +253,13 @@ prompts:
       | Thời điểm | Thay đổi | Nguồn |
       |-----------|----------|-------|
     - Tối đa 1000 words per page.
-    - Dùng [[slug]] để liên kết entities liên quan.
+    - **BẮT BUỘC dùng `[[pages/category/slug.md]]` syntax** khi nhắc đến bất kỳ model, framework, method, concept, researcher, lab, dataset, benchmark, tool nào:
+      - Entity → `[[pages/entities/slug.md]]`
+      - Topic → `[[pages/topics/slug.md]]`
+      - Summary → `[[pages/summaries/slug.md]]`
+      Slug chỉ gồm `[a-z0-9]`, KHÔNG dùng gạch ngang, KHÔNG dùng `[[slug]]` thuần.
+      Ví dụ: `[[pages/entities/imagenet.md]]`, `[[pages/entities/lora.md]]`, `[[pages/entities/googledeepmind.md]]`, `[[pages/topics/efficientml.md]]`.
+    - Section "Entities liên quan" PHẢI liệt kê đầy đủ các entity được nhắc đến, mỗi entity một dòng với `[[pages/entities/slug.md]]` và mô tả quan hệ.
 
 rag:
   chunk_size: 1000

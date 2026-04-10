@@ -92,13 +92,16 @@ HTTP Request → FastAPI Router (api/v1/) → Service Layer → Repository / ADK
 - Storage: file-based Markdown, dual backend — local filesystem (dev) hoặc S3 (production ECS). `WikiRepository` tự detect qua `settings.storage_backend`.
 - Cấu trúc: `wiki/{user_id}/pages/{entities|topics|summaries}/`, `raw/`, `index.md`, `log.md`, `CLAUDE.md` (schema).
 - Entity taxonomy: `model`, `framework`, `dataset`, `benchmark`, `researcher`, `lab`, `tool`, `method`, `concept` — phân biệt `method` (algorithm cụ thể có thể implement) vs `concept` (paradigm tổng quát).
-- Pipeline: `_extract_topics()` (LLM → JSON `{entities, topics, summary}`) → synthesize pages → `_rebuild_index()` (rule-based, không LLM) → `append_log()`.
-- Limits: `wiki_max_entities_per_source=10`, `wiki_max_topics_per_source=3`, luôn 1 summary per source.
-- Race condition guard: `asyncio.Lock` per `"{user_id}:{rel_path}"` trong module-level `_page_locks` dict.
-- ADK tools chỉ READ: `read_wiki_index` → `read_wiki_page` → fallback RAG. Agent luôn gọi wiki trước.
-- Deletion cascade: `remove_source_from_wiki()` — 1 source → xóa page; multi-source → LLM re-synthesize.
+- Pipeline: `_extract_topics()` (LLM → JSON `{entities, topics, summary}`) → synthesize pages → `_update_link_index()` → `_create_ghost_stubs()` → `_update_related_pages()` → `_rebuild_index()` → `_rebuild_link_index()` → `append_log()`.
+- Limits: `wiki_max_entities_per_source=10`, `wiki_max_topics_per_source=3`, `wiki_max_related_pages_per_source=5`.
+- Race condition guard: `asyncio.Lock` per `"{user_id}:{rel_path}"` trong `_page_locks` dict; riêng `_link_index_locks` per user cho `link_index.json`.
+- **Bidirectional link index** (`link_index.json`): sau mỗi synthesis, extract `[[slug]]` → lưu forward links. `read_wiki_page()` tool trả `backlinks` (pages khác link đến trang này), `is_stub` flag.
+- **Ghost Link stubs**: khi LLM generate `[[slug]]` cho entity chưa tồn tại → auto-create stub page (`version=0`, `stub=true`) để agent không bị confused.
+- **Smart re-ingestion**: sau khi process extracted entities, tìm các pages cũ đang link đến những entities đó (qua `link_index.json`) → re-synthesize top-5 pages theo hub score (backlink_count DESC, last_updated ASC).
+- ADK tools chỉ READ: `read_wiki_index` → `read_wiki_page` (có `backlinks`, `is_stub`) → fallback RAG. Agent duyệt backlinks khi thông tin chưa đủ.
+- Deletion cascade: `remove_source_from_wiki()` — 1 source → xóa page + clean link index; multi-source → LLM re-synthesize + update link index.
 - ⚠️ `Part.from_text()` trong google-genai mới là keyword-only: dùng `Part.from_text(text=...)`.
-- Config: `WIKI_ENABLED`, `WIKI_BASE_DIR`, `WIKI_MAX_TEXT_CHARS`, `WIKI_MAX_ENTITIES_PER_SOURCE`, `WIKI_MAX_TOPICS_PER_SOURCE`.
+- Config: `WIKI_ENABLED`, `WIKI_BASE_DIR`, `WIKI_MAX_TEXT_CHARS`, `WIKI_MAX_ENTITIES_PER_SOURCE`, `WIKI_MAX_TOPICS_PER_SOURCE`, `WIKI_MAX_RELATED_PAGES_PER_SOURCE`.
 
 **Frontend Audio Capture** (`services/AudioCaptureService.ts`): Dùng AudioWorklet (inline blob) resample → 16kHz PCM16. Hỗ trợ 3 nguồn: `mic` (getUserMedia), `system` (getDisplayMedia), `both` (AudioContext merge). Chunks gửi tới backend qua `POST /api/v1/transcription/audio/{id}`. `TranscriptionPanel` toggle bằng Mic icon ở header.
 

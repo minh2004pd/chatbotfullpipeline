@@ -1,14 +1,18 @@
 import { useState } from 'react'
-import { Menu, X, Mic } from 'lucide-react'
+import { Menu, X, Mic, Network } from 'lucide-react'
 import Sidebar from './Sidebar'
 import ChatWindow from '@/components/chat/ChatWindow'
 import ToastContainer from '@/components/ui/ToastContainer'
 import TranscriptionPanel from '@/components/transcription/TranscriptionPanel'
+import WikiGraphPanel from '@/components/wiki/WikiGraphPanel'
 import { useChatStore } from '@/store/chatStore'
+
+type MainView = 'chat' | 'wiki'
 
 export default function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [transcriptionOpen, setTranscriptionOpen] = useState(false)
+  const [mainView, setMainView] = useState<MainView>('chat')
   const toasts = useChatStore((s) => s.toasts)
   const removeToast = useChatStore((s) => s.removeToast)
 
@@ -75,6 +79,32 @@ export default function AppLayout() {
             <span className="text-sm font-medium text-[#a0a0a0]">MemRAG Chat</span>
           </div>
           <div className="flex-1" />
+
+          {/* View toggle */}
+          <div className="flex items-center gap-0.5 bg-[#1a1a1a] border border-[#2e2e2e] rounded-md p-0.5">
+            <button
+              onClick={() => setMainView('chat')}
+              className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                mainView === 'chat'
+                  ? 'bg-[#2a2a2a] text-[#f1f1f1]'
+                  : 'text-[#555] hover:text-[#a0a0a0]'
+              }`}
+            >
+              Chat
+            </button>
+            <button
+              onClick={() => setMainView('wiki')}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                mainView === 'wiki'
+                  ? 'bg-[#2a2a2a] text-[#f1f1f1]'
+                  : 'text-[#555] hover:text-[#a0a0a0]'
+              }`}
+            >
+              <Network size={12} />
+              Knowledge
+            </button>
+          </div>
+
           <button
             onClick={() => setTranscriptionOpen((v) => !v)}
             className={`p-1.5 rounded-md transition-colors ${
@@ -86,14 +116,11 @@ export default function AppLayout() {
           >
             <Mic size={18} />
           </button>
-          <div className="text-xs text-[#666] hidden sm:block">
-            Multimodal · RAG · Long-term Memory
-          </div>
         </header>
 
-        {/* Chat window */}
+        {/* Main view */}
         <div className="flex-1 min-h-0">
-          <ChatWindow />
+          {mainView === 'chat' ? <ChatWindow /> : <WikiGraphPanel />}
         </div>
       </main>
 
