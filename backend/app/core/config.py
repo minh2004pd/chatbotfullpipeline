@@ -71,7 +71,9 @@ class Settings(BaseSettings):
     wiki_max_text_chars: int = 16384  # truncate text trước khi gửi LLM
     wiki_max_entities_per_source: int = 10  # số entities tối đa extract per source
     wiki_max_topics_per_source: int = 3  # số topics tối đa extract per source (không tính entities)
-    wiki_max_related_pages_per_source: int = 5  # số related pages tối đa được re-synthesize per ingest
+    wiki_max_related_pages_per_source: int = (
+        5  # số related pages tối đa được re-synthesize per ingest
+    )
 
     # Context filter & summarization
     max_context_messages: int = 20  # simple truncation fallback

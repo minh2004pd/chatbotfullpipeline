@@ -4,7 +4,12 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.core.dependencies import UserIDDep, WikiRepoDep
 from app.schemas.wiki import WikiGraphEdge, WikiGraphNode, WikiGraphResponse, WikiPageResponse
-from app.utils.wiki_utils import parse_frontmatter, parse_sources_count, parse_sources_list, slug_from_rel_path
+from app.utils.wiki_utils import (
+    parse_frontmatter,
+    parse_sources_count,
+    parse_sources_list,
+    slug_from_rel_path,
+)
 
 router = APIRouter(prefix="/wiki", tags=["wiki"])
 
@@ -103,11 +108,13 @@ def get_wiki_graph(
             if tgt_key not in valid_keys or src_key == tgt_key or (src_key, tgt_key) in seen:
                 continue
             seen.add((src_key, tgt_key))
-            edges.append(WikiGraphEdge(
-                id=f"{src_key}__{tgt_key}".replace("/", "_"),
-                source=src_key,
-                target=tgt_key,
-            ))
+            edges.append(
+                WikiGraphEdge(
+                    id=f"{src_key}__{tgt_key}".replace("/", "_"),
+                    source=src_key,
+                    target=tgt_key,
+                )
+            )
 
     return WikiGraphResponse(nodes=nodes, edges=edges)
 

@@ -153,7 +153,9 @@ class WikiService:
                 # Merge sources: thêm sources của file cũ vào file mới
                 old_sources = _parse_frontmatter_sources(old_content)
                 new_sources = _parse_frontmatter_sources(existing_new)
-                merged_sources = list(dict.fromkeys(new_sources + old_sources))  # deduplicate, preserve order
+                merged_sources = list(
+                    dict.fromkeys(new_sources + old_sources)
+                )  # deduplicate, preserve order
                 if merged_sources != new_sources:
                     updated = re.sub(
                         r"^sources:\s*\[.*?\]",
@@ -695,8 +697,7 @@ class WikiService:
             return []
 
         existing_paths = {
-            page_info["rel_path"]
-            for page_info in self._repo.list_all_pages(user_id=user_id)
+            page_info["rel_path"] for page_info in self._repo.list_all_pages(user_id=user_id)
         }
 
         stubs_created = []
@@ -780,9 +781,7 @@ class WikiService:
                     source_id=source_id,
                 )
                 if new_content:
-                    self._repo.write_page(
-                        user_id=user_id, rel_path=rel_path, content=new_content
-                    )
+                    self._repo.write_page(user_id=user_id, rel_path=rel_path, content=new_content)
                     await self._update_link_index(
                         user_id=user_id,
                         rel_path=rel_path,

@@ -2,10 +2,10 @@ from pydantic import BaseModel
 
 
 class WikiGraphNode(BaseModel):
-    key: str    # unique React Flow id: "{category}/{slug}", e.g. "entities/lora"
-    id: str     # slug only, dùng cho API calls: "lora"
+    key: str  # unique React Flow id: "{category}/{slug}", e.g. "entities/lora"
+    id: str  # slug only, dùng cho API calls: "lora"
     title: str
-    type: str   # model/method/concept/... hoặc "topic"/"summary"
+    type: str  # model/method/concept/... hoặc "topic"/"summary"
     category: str  # entities/topics/summaries
     source_count: int
     backlink_count: int

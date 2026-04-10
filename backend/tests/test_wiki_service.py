@@ -572,10 +572,7 @@ def test_rebuild_link_index_no_self_link(service, repo):
 def test_rebuild_link_index_excludes_stubs(service, repo):
     """Stub pages không xuất hiện trong link_index keys."""
     repo.ensure_wiki_structure(user_id=USER)
-    stub_content = (
-        "---\ntitle: Foo\nstub: true\nversion: 0\n---\n\n"
-        "[[pages/entities/bar.md]]"
-    )
+    stub_content = "---\ntitle: Foo\nstub: true\nversion: 0\n---\n\n[[pages/entities/bar.md]]"
     repo.write_page(user_id=USER, rel_path="pages/entities/foo.md", content=stub_content)
 
     service._rebuild_link_index(user_id=USER)
@@ -587,12 +584,8 @@ def test_rebuild_link_index_excludes_stubs(service, repo):
 def test_rebuild_link_index_topic_links_entities(service, repo):
     """Topic page được explicit link đến entity pages có chung source_id."""
     repo.ensure_wiki_structure(user_id=USER)
-    entity_content = (
-        "---\ntitle: LoRA\nsources: [doc-1]\nversion: 1\n---\n\n# LoRA"
-    )
-    topic_content = (
-        "---\ntitle: Efficient ML\nsources: [doc-1]\nversion: 1\n---\n\n# Efficient ML"
-    )
+    entity_content = "---\ntitle: LoRA\nsources: [doc-1]\nversion: 1\n---\n\n# LoRA"
+    topic_content = "---\ntitle: Efficient ML\nsources: [doc-1]\nversion: 1\n---\n\n# Efficient ML"
     repo.write_page(user_id=USER, rel_path="pages/entities/lora.md", content=entity_content)
     repo.write_page(user_id=USER, rel_path="pages/topics/efficientml.md", content=topic_content)
 

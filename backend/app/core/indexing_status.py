@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 
 _EXPIRE_SECS = 600  # auto-expire sau 10 phút
 
+
 @dataclass
 class _WikiEntry:
     status: str  # "processing" | "done" | "error"
