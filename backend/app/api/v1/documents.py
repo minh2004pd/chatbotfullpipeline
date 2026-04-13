@@ -54,7 +54,7 @@ async def upload_document(
                 user_id=user_id,
                 document_id=result.document_id,
                 filename=file.filename,
-                full_text=full_text[: settings.wiki_max_text_chars],
+                full_text=full_text,  # không truncate — wiki service tự chunk
             )
         )
 

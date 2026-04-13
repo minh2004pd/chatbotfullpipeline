@@ -3,6 +3,7 @@
 import structlog
 from google.adk.tools import ToolContext
 
+from app.agents.tools.utils import get_user_id
 from app.core.database import get_qdrant_client
 from app.repositories.qdrant_repo import QdrantRepository
 
@@ -24,7 +25,7 @@ def list_user_documents(tool_context: ToolContext) -> dict:
         Dict với danh sách filename và document_id của từng tài liệu đã upload.
         Trả về found=False nếu chưa có tài liệu nào.
     """
-    user_id = tool_context.state.get("user_id", "default_user")
+    user_id = get_user_id(tool_context)
 
     try:
         repo = QdrantRepository(get_qdrant_client())

@@ -34,7 +34,11 @@ async def chat_stream(
     async def generate():
         try:
             async for chunk in service.chat_stream(request):
-                yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
+                if isinstance(chunk, dict):
+                    # Wiki access event — pass-through as structured SSE
+                    yield f"data: {json.dumps(chunk)}\n\n"
+                else:
+                    yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
         except Exception as exc:
             yield f"data: {json.dumps({'content': f'[Error: {exc}]', 'done': False})}\n\n"
         finally:

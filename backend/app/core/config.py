@@ -68,12 +68,29 @@ class Settings(BaseSettings):
     # Wiki
     wiki_base_dir: str = "./wiki"
     wiki_enabled: bool = True
-    wiki_max_text_chars: int = 16384  # truncate text trước khi gửi LLM
-    wiki_max_entities_per_source: int = 10  # số entities tối đa extract per source
-    wiki_max_topics_per_source: int = 3  # số topics tối đa extract per source (không tính entities)
+    wiki_chunk_size: int = 16384  # chunk size cho extraction (split paper dài)
+    wiki_max_entities_per_source: int = 20  # số entities tối đa extract per source
+    wiki_max_topics_per_source: int = 5  # số topics tối đa extract per source (không tính entities)
     wiki_max_related_pages_per_source: int = (
         5  # số related pages tối đa được re-synthesize per ingest
     )
+    wiki_max_parallel_extractions: int = 5  # concurrent _extract_topics calls
+    wiki_max_parallel_synthesis: int = 5  # concurrent _synthesize_page calls
+    wiki_synthesis_max_text_per_page: int = 32768  # max merged text per page (2x chunk_size)
+
+    # PostgreSQL (auth)
+    database_url: str = "postgresql+asyncpg://memrag:memrag@localhost:5432/memrag"
+
+    # JWT
+    jwt_secret_key: str = ""
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = 15
+    jwt_refresh_token_expire_days: int = 7
+
+    # Google OAuth
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    google_oauth_redirect_uri: str = ""
 
     # Context filter & summarization
     max_context_messages: int = 20  # simple truncation fallback

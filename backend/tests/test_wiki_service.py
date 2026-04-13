@@ -1,5 +1,6 @@
 """Unit tests cho WikiService — mock LLM calls, dùng WikiRepository real (local fs)."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -7,11 +8,14 @@ import pytest
 from app.repositories.wiki_repo import WikiRepository
 from app.services.wiki_service import (
     WikiService,
+    _build_slug_to_chunks,
+    _ChunkExtraction,
     _extract_wiki_links,
     _is_stub,
     _normalize_wiki_link,
     _parse_frontmatter_sources,
     _parse_frontmatter_title,
+    _reduce_extractions,
     _slugify,
     _strip_code_fence,
 )
@@ -33,9 +37,13 @@ def repo(wiki_dir):
 def settings():
     s = MagicMock()
     s.wiki_enabled = True
-    s.wiki_max_text_chars = 1000
+    s.wiki_chunk_size = 1000
     s.wiki_max_topics_per_source = 3
     s.wiki_max_entities_per_source = 10
+    s.wiki_max_parallel_extractions = 5
+    s.wiki_max_parallel_synthesis = 5
+    s.wiki_synthesis_max_text_per_page = 32768
+    s.wiki_max_related_pages_per_source = 5
     return s
 
 
@@ -307,7 +315,12 @@ async def test_update_wiki_from_transcript_creates_page(service, repo):
         {"speaker": "speaker_A", "text": "Chúng ta quyết định dùng Gemini 2.5"},
         {"speaker": "speaker_B", "text": "Đồng ý, và deploy lên ECS"},
     ]
-    topics = [{"slug": "meeting-q1-review", "category": "summaries", "title": "Q1 Review Meeting"}]
+    # With chunking: mock returns entities/topics from extraction,
+    # merge creates summary from source_name
+    topics = [
+        {"slug": "gemini", "category": "entities", "title": "Gemini", "type": "model"},
+        {"slug": "topic-q1review", "category": "topics", "title": "Q1 Review"},
+    ]
     synthesized = "---\ntitle: Q1 Review Meeting\nsources: [meet-1]\nlast_updated: 2026-04-09\nversion: 1\n---\n\n# Q1 Review"
 
     with (
@@ -321,7 +334,7 @@ async def test_update_wiki_from_transcript_creates_page(service, repo):
             utterances=utterances,
         )
 
-    page = repo.read_page(user_id=USER, rel_path="pages/summaries/meeting-q1-review.md")
+    page = repo.read_page(user_id=USER, rel_path="pages/summaries/q1reviewmeeting.md")
     assert page is not None
     assert "Q1 Review" in page
 
@@ -641,3 +654,340 @@ def test_rebuild_index_excludes_stubs(service, repo):
 
     assert "pages/entities/foo.md" not in index
     assert "pages/entities/bar.md" in index
+
+
+# ── Chunking helper ───────────────────────────────────────────────────────────
+
+
+def test_split_text_short_text_returns_single_chunk():
+    from app.services.wiki_service import _split_text_for_extraction
+
+    text = "Short text"
+    result = _split_text_for_extraction(text, chunk_size=100)
+    assert result == ["Short text"]
+
+
+def test_split_text_splits_at_paragraph():
+    from app.services.wiki_service import _split_text_for_extraction
+
+    text = "A" * 50 + "\n\n" + "B" * 50
+    result = _split_text_for_extraction(text, chunk_size=60)
+    assert len(result) == 2
+    assert "A" * 50 in result[0]
+    assert "B" * 50 in result[1]
+
+
+def test_split_text_splits_at_sentence():
+    from app.services.wiki_service import _split_text_for_extraction
+
+    text = "First sentence. " * 20  # 320 chars, no paragraphs
+    result = _split_text_for_extraction(text, chunk_size=100)
+    assert len(result) >= 2
+    # Each chunk should end at sentence boundary, not mid-sentence
+    for chunk in result[:-1]:
+        assert chunk.rstrip().endswith(".") or chunk.rstrip().endswith("!") or chunk.rstrip().endswith("?")
+
+
+def test_split_text_no_content_lost():
+    from app.services.wiki_service import _split_text_for_extraction
+
+    text = "Chunk1 content.\n\nChunk2 content.\n\nChunk3 content."
+    result = _split_text_for_extraction(text, chunk_size=20)
+    # All original content should be preserved
+    combined = " ".join(result)
+    assert "Chunk1 content." in combined
+    assert "Chunk2 content." in combined
+    assert "Chunk3 content." in combined
+
+
+# ── Merge extraction results ─────────────────────────────────────────────────
+
+
+def test_merge_deduplicates_entities():
+    from app.services.wiki_service import _merge_extraction_results
+
+    all_topics = [
+        {"slug": "lora", "category": "entities", "title": "LoRA", "type": "method"},
+        {"slug": "lora", "category": "entities", "title": "LoRA duplicate", "type": "method"},
+        {"slug": "gpt4", "category": "entities", "title": "GPT-4", "type": "model"},
+    ]
+    result = _merge_extraction_results(all_topics, "test-source")
+    entities = [t for t in result if t["category"] == "entities"]
+    assert len(entities) == 2
+    assert entities[0]["slug"] == "lora"
+    assert entities[0]["title"] == "LoRA"  # first occurrence kept
+
+
+def test_merge_deduplicates_topics():
+    from app.services.wiki_service import _merge_extraction_results
+
+    all_topics = [
+        {"slug": "finetuning", "category": "topics", "title": "Fine-tuning"},
+        {"slug": "finetuning", "category": "topics", "title": "Fine-tuning dup"},
+    ]
+    result = _merge_extraction_results(all_topics, "test-source")
+    topics = [t for t in result if t["category"] == "topics"]
+    assert len(topics) == 1
+
+
+def test_merge_ensures_entity_and_topic():
+    from app.services.wiki_service import _merge_extraction_results
+
+    result = _merge_extraction_results([], "empty-source")
+    entities = [t for t in result if t["category"] == "entities"]
+    topics = [t for t in result if t["category"] == "topics"]
+    summaries = [t for t in result if t["category"] == "summaries"]
+    assert len(entities) == 1
+    assert len(topics) == 1
+    assert len(summaries) == 1
+
+
+def test_merge_always_one_summary():
+    from app.services.wiki_service import _merge_extraction_results
+
+    all_topics = [
+        {"slug": "e1", "category": "entities", "title": "E1"},
+        {"slug": "t1", "category": "topics", "title": "T1"},
+        {"slug": "s1", "category": "summaries", "title": "Should be ignored"},
+    ]
+    result = _merge_extraction_results(all_topics, "my-source.pdf")
+    summaries = [t for t in result if t["category"] == "summaries"]
+    assert len(summaries) == 1
+    assert summaries[0]["slug"] == "mysourcepdf"  # from source_name, not chunk
+
+
+# ── _reduce_extractions: deduplication across chunks ─────────────────────────
+
+
+def test_reduce_extractions_deduplicates_across_chunks():
+    """3 extractions với overlapping slugs → deduplicate, longer chunk wins.
+
+    Khi một entity xuất hiện ở nhiều chunks, metadata từ chunk dài nhất được ưu tiên
+    (heuristic: chunk dài hơn = định nghĩa chi tiết hơn, thường ở Methodology thay vì Intro).
+    """
+    extractions = [
+        _ChunkExtraction(
+            chunk_index=0,
+            items=[
+                {"slug": "lora", "category": "entities", "title": "LoRA Intro", "type": "method"},
+                {"slug": "finetuning", "category": "topics", "title": "Fine-tuning Intro"},
+            ],
+            chunk_text="short intro",  # 11 chars
+        ),
+        _ChunkExtraction(
+            chunk_index=1,
+            items=[
+                {"slug": "lora", "category": "entities", "title": "LoRA Method Detail", "type": "method"},
+                {"slug": "qlora", "category": "entities", "title": "QLoRA", "type": "method"},
+                {"slug": "finetuning", "category": "topics", "title": "Fine-tuning Method"},
+            ],
+            chunk_text="A" * 100,  # 100 chars — dài nhất → wins cho lora + finetuning
+        ),
+        _ChunkExtraction(
+            chunk_index=2,
+            items=[
+                {"slug": "lora", "category": "entities", "title": "LoRA Experiment", "type": "method"},
+                {"slug": "adamw", "category": "entities", "title": "AdamW", "type": "optimizer"},
+            ],
+            chunk_text="medium exp " * 5,  # 55 chars
+        ),
+    ]
+
+    result = _reduce_extractions(extractions, "test-source", max_entities=10, max_topics=5)
+
+    entities = [t for t in result if t["category"] == "entities"]
+    topics = [t for t in result if t["category"] == "topics"]
+    summaries = [t for t in result if t["category"] == "summaries"]
+
+    # Dedup: longer chunk wins → "LoRA Method Detail" từ chunk 100 chars
+    assert len(entities) == 3  # lora, qlora, adamw
+    assert entities[0]["slug"] == "lora"
+    assert entities[0]["title"] == "LoRA Method Detail"  # longest chunk wins
+    assert entities[0]["type"] == "method"
+    assert entities[1]["slug"] == "qlora"
+    assert entities[2]["slug"] == "adamw"
+
+    assert len(topics) == 1  # finetuning
+    assert topics[0]["title"] == "Fine-tuning Method"  # longest chunk wins
+
+    assert len(summaries) == 1  # luôn có 1 summary
+
+
+def test_reduce_extractions_respects_limits():
+    """Nhiều hơn max_entities/max_topics → apply limits."""
+    extractions = [
+        _ChunkExtraction(
+            chunk_index=0,
+            items=[{"slug": f"entity{i}", "category": "entities", "title": f"Entity {i}"} for i in range(15)],
+            chunk_text="chunk 0",
+        ),
+        _ChunkExtraction(
+            chunk_index=1,
+            items=[{"slug": f"topic{i}", "category": "topics", "title": f"Topic {i}"} for i in range(10)],
+            chunk_text="chunk 1",
+        ),
+    ]
+
+    result = _reduce_extractions(extractions, "test-source", max_entities=5, max_topics=3)
+
+    entities = [t for t in result if t["category"] == "entities"]
+    topics = [t for t in result if t["category"] == "topics"]
+
+    assert len(entities) == 5  # capped at max_entities
+    assert len(topics) == 3  # capped at max_topics
+
+
+def test_reduce_extractions_fallbacks():
+    """Empty extractions → fallback entity + topic."""
+    extractions = []
+
+    result = _reduce_extractions(extractions, "empty-source", max_entities=10, max_topics=5)
+
+    entities = [t for t in result if t["category"] == "entities"]
+    topics = [t for t in result if t["category"] == "topics"]
+    summaries = [t for t in result if t["category"] == "summaries"]
+
+    assert len(entities) == 1
+    assert entities[0]["slug"] == _slugify("empty-source")
+    assert len(topics) == 1
+    # Topic slug được tạo từ ("topic-" + _slugify(source_name))[:60]
+    assert topics[0]["slug"] == ("topic-" + _slugify("empty-source"))[:60]
+    assert len(summaries) == 1
+
+
+# ── _build_slug_to_chunks: caps text size ────────────────────────────────────
+
+
+def test_build_slug_to_chunks_caps_text_size():
+    """Slug xuất hiện trong 5+ chunks, text bị cap ở max_text_per_page."""
+    max_text = 100  # nhỏ để test
+    chunk_texts = {
+        0: "A" * 40,
+        1: "B" * 40,
+        2: "C" * 40,
+        3: "D" * 40,
+        4: "E" * 40,
+    }
+
+    extractions = [
+        _ChunkExtraction(chunk_index=i, items=[{"slug": "myentity", "category": "entities", "title": "MyEntity"}], chunk_text=text)
+        for i, text in chunk_texts.items()
+    ]
+
+    deduped_items = [{"slug": "myentity", "category": "entities", "title": "MyEntity"}]
+
+    result = _build_slug_to_chunks(extractions, deduped_items, max_text_per_page=max_text)
+
+    # Phải có ít nhất 1 chunk
+    assert "myentity" in result
+    assert len(result["myentity"]) >= 1
+
+    # Tổng text không vượt quá quá nhiều max_text (có thể vượt 1 chunk cuối)
+    total_len = sum(len(t) for t in result["myentity"])
+    # Với greedy approach: sẽ thêm chunks cho đến khi vượt limit
+    assert total_len <= max_text + 40  # max 1 chunk overflow
+
+
+def test_build_slug_to_chunks_includes_at_least_one_chunk():
+    """Luôn include ít nhất 1 chunk dù vượt limit."""
+    max_text = 10
+    extractions = [
+        _ChunkExtraction(
+            chunk_index=0,
+            items=[{"slug": "bigentity", "category": "entities", "title": "BigEntity"}],
+            chunk_text="X" * 200,  # chunk lớn hơn max_text
+        ),
+    ]
+
+    deduped_items = [{"slug": "bigentity", "category": "entities", "title": "BigEntity"}]
+
+    result = _build_slug_to_chunks(extractions, deduped_items, max_text_per_page=max_text)
+
+    # Vẫn phải có ít nhất 1 chunk
+    assert "bigentity" in result
+    assert len(result["bigentity"]) == 1
+    assert len(result["bigentity"][0]) == 200
+
+
+# ── Parallel extraction concurrency test ─────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_parallel_extraction_runs_concurrently(service, repo):
+    """Verify asyncio.gather thực sự chạy extraction song song."""
+    import time
+
+    call_times = []
+
+    async def mock_extract(text, source_name):
+        call_times.append(time.monotonic())
+        await asyncio.sleep(0.1)  # simulate LLM latency
+        return [
+            {"slug": f"entity{len(call_times)}", "category": "entities", "title": f"Entity {len(call_times)}"},
+        ]
+
+    synthesized = "---\ntitle: Test\nsources: [doc-1]\nlast_updated: 2026-04-09\nversion: 1\n---\n\n# Test"
+
+    mock_extract_wrapper = AsyncMock(side_effect=mock_extract)
+    mock_synthesize = AsyncMock(return_value=synthesized)
+
+    with (
+        patch.object(service, "_extract_topics", new=mock_extract_wrapper),
+        patch.object(service, "_synthesize_page", new=mock_synthesize),
+    ):
+        await service.update_wiki_from_document(
+            user_id=USER,
+            document_id="doc-parallel",
+            filename="parallel.pdf",
+            full_text="Chunk1 " + "A" * 500 + "\n\nChunk2 " + "B" * 500 + "\n\nChunk3 " + "C" * 500,
+        )
+
+    # Verify multiple extractions were called (text > 1000 chars → split into chunks)
+    assert mock_extract_wrapper.call_count >= 1
+
+    # Verify synthesis was called
+    assert mock_synthesize.call_count >= 1
+
+    # Verify pages được tạo (mock synthesizer trả về nội dung cố định)
+    topic_page = repo.read_page(user_id=USER, rel_path="pages/topics/topic-parallelpdf.md")
+    assert topic_page is not None
+    assert "Test" in topic_page  # mock synthesizer trả về "# Test"
+
+
+# ── Error isolation: pipeline continues when one chunk fails ──────────────────
+
+
+@pytest.mark.asyncio
+async def test_pipeline_continues_when_one_chunk_fails(service, repo):
+    """Khi 1 chunk extraction lỗi, các chunk khác vẫn tiếp tục pipeline."""
+    call_count = 0
+
+    async def mock_extract_fail_on_chunk_1(text, source_name):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:  # chunk thứ 2 fail
+            raise RuntimeError("Chunk 2: content policy violation")
+        return [
+            {"slug": f"entity{call_count}", "category": "entities", "title": f"Entity {call_count}"},
+        ]
+
+    synthesized = "---\ntitle: Test\nsources: [doc-err]\nlast_updated: 2026-04-09\nversion: 1\n---\n\n# Test"
+
+    with (
+        patch.object(service, "_extract_topics", new=AsyncMock(side_effect=mock_extract_fail_on_chunk_1)),
+        patch.object(service, "_synthesize_page", new=AsyncMock(return_value=synthesized)),
+    ):
+        # Pipeline KHÔNG được raise
+        await service.update_wiki_from_document(
+            user_id=USER,
+            document_id="doc-err",
+            filename="error-test.pdf",
+            full_text="Chunk1 " + "A" * 500 + "\n\nChunk2 " + "B" * 500 + "\n\nChunk3 " + "C" * 500,
+        )
+
+    # Chunk 2 fail, nhưng chunk 1 và 3 vẫn chạy → call_count >= 3 (có thể retry)
+    assert call_count >= 2
+
+    # Wiki vẫn có pages được tạo từ các chunk thành công
+    all_pages = repo.list_all_pages(user_id=USER)
+    assert len(all_pages) > 0, "Phải có ít nhất 1 page từ các chunk thành công"

@@ -80,6 +80,15 @@
     from { transform: translateY(6px); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }
   }
+
+  /* Wiki node active pulse */
+  @keyframes wikiPulse {
+    0%, 100% { box-shadow: 0 0 4px 1px rgba(250, 204, 21, 0.3); }
+    50% { box-shadow: 0 0 14px 4px rgba(250, 204, 21, 0.6); }
+  }
+  .animate-wiki-pulse {
+    animation: wikiPulse 1.5s ease-in-out infinite;
+  }
 }
 
 /* ─── Prose overrides for assistant messages ───────────────────────── */

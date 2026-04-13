@@ -4,20 +4,26 @@ import type { WikiGraphNode } from '@/types'
 import { getNodeColor } from '@/utils/wikiNodeColors'
 
 export const WikiNodeCard = memo(({ data, selected }: NodeProps) => {
-  const node = data as unknown as WikiGraphNode
+  const node = data as unknown as WikiGraphNode & { isActive?: boolean }
   const color = getNodeColor(node.type)
+  const isActive = node.isActive ?? false
 
   return (
     <div
       className={`
         px-3 py-2 rounded-lg border text-xs cursor-pointer select-none
         transition-all duration-150 min-w-[120px] max-w-[160px]
-        ${selected
-          ? 'border-white/60 shadow-lg shadow-black/40'
-          : 'border-white/10 hover:border-white/30'
+        ${isActive
+          ? 'animate-wiki-pulse border-yellow-400/80'
+          : selected
+            ? 'border-white/60 shadow-lg shadow-black/40'
+            : 'border-white/10 hover:border-white/30'
         }
       `}
-      style={{ background: `${color}22`, borderColor: selected ? color : undefined }}
+      style={{
+        background: isActive ? `${color}33` : `${color}22`,
+        borderColor: isActive ? undefined : (selected ? color : undefined),
+      }}
     >
       <Handle type="target" position={Position.Left} className="!w-2 !h-2 !border-0" style={{ background: color }} />
 

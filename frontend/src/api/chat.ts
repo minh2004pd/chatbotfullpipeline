@@ -1,5 +1,5 @@
 import type { ChatRequest, SSEChunk, Citation } from '@/types'
-import { getApiBaseUrl, getUserId } from './client'
+import { getApiBaseUrl } from './client'
 
 export interface StreamChatOptions {
   request: ChatRequest
@@ -7,6 +7,7 @@ export interface StreamChatOptions {
   onCitations: (citations: Citation[]) => void
   onDone: () => void
   onError: (error: string) => void
+  onWikiAccess?: (tool: string, args: Record<string, string>) => void
   signal?: AbortSignal
 }
 
@@ -20,6 +21,7 @@ export async function streamChat({
   onCitations,
   onDone,
   onError,
+  onWikiAccess,
   signal,
 }: StreamChatOptions): Promise<void> {
   const url = `${getApiBaseUrl()}/api/v1/chat/stream`
@@ -30,9 +32,9 @@ export async function streamChat({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-User-ID': getUserId(),
       },
       body: JSON.stringify(request),
+      credentials: 'include', // send HTTP-only cookies
       signal,
     })
   } catch (err) {
@@ -94,6 +96,11 @@ export async function streamChat({
           }
           onDone()
           return
+        }
+
+        if (chunk.type === 'wiki_access' && chunk.tool) {
+          onWikiAccess?.(chunk.tool, chunk.args ?? {})
+          continue
         }
 
         if (chunk.content) {

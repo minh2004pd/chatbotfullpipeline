@@ -14,6 +14,8 @@ from google.genai.types import Content, Part
 from app.core.config import Settings
 from app.schemas.chat import ChatRequest, ChatResponse, Citation
 
+WIKI_TOOLS = frozenset({"read_wiki_page", "read_wiki_index", "list_wiki_pages"})
+
 logger = structlog.get_logger(__name__)
 
 APP_NAME = "memrag"
@@ -67,7 +69,7 @@ async def _ensure_session(
     session_id: str,
     max_context_messages: int,
 ) -> None:
-    """Tạo session nếu chưa tồn tại."""
+    """Tạo session nếu chưa tồn tại, đảm bảo state luôn có user_id."""
     existing = await session_service.get_session(
         app_name=APP_NAME, user_id=user_id, session_id=session_id
     )
@@ -81,6 +83,19 @@ async def _ensure_session(
                 "max_context_messages": max_context_messages,
             },
         )
+    elif existing.state.get("user_id") != user_id:
+        # Session cũ không có user_id trong state → cập nhật để tools dùng đúng
+        existing.state["user_id"] = user_id
+        # DynamoDBSessionService có update_session_state, InMemory thì dùng save_session
+        if hasattr(session_service, "update_session_state"):
+            await session_service.update_session_state(
+                app_name=APP_NAME,
+                user_id=user_id,
+                session_id=session_id,
+                state=existing.state,
+            )
+        else:
+            await session_service.save_session(existing)
 
 
 class ChatService:
@@ -166,8 +181,13 @@ class ChatService:
             citations=citations,
         )
 
-    async def chat_stream(self, request: ChatRequest) -> AsyncIterator[str]:
-        """Stream response dưới dạng SSE chunks."""
+    async def chat_stream(self, request: ChatRequest) -> AsyncIterator[str | dict]:
+        """Stream response dưới dạng SSE chunks.
+
+        Yields:
+            str: text chunk từ agent.
+            dict: wiki_access event khi agent gọi wiki tools.
+        """
         session_id = self._resolve_session_id(request.session_id, request.user_id)
 
         await _ensure_session(
@@ -211,6 +231,22 @@ class ChatService:
                         for part in event.content.parts:
                             if part.text and not yielded_any:
                                 yield part.text
+
+                    # Detect wiki tool calls → emit wiki_access event
+                    if event.content and event.content.parts:
+                        for part in event.content.parts:
+                            fc = getattr(part, "function_call", None)
+                            if fc and fc.name in WIKI_TOOLS:
+                                logger.info(
+                                    "wiki_tool_access",
+                                    tool=fc.name,
+                                    user_id=request.user_id,
+                                )
+                                yield {
+                                    "type": "wiki_access",
+                                    "tool": fc.name,
+                                    "args": dict(fc.args or {}),
+                                }
                 return  # thành công → dừng retry
             except Exception as exc:
                 err_str = str(exc)

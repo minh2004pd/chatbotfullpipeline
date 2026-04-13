@@ -3,6 +3,7 @@
 import structlog
 from google.adk.tools import ToolContext
 
+from app.agents.tools.utils import get_user_id
 from app.core.config import get_settings
 from app.core.database import get_mem0_client
 from app.repositories.mem0_repo import Mem0Repository
@@ -29,7 +30,7 @@ def retrieve_memories(query: str, tool_context: ToolContext) -> dict:
         Dict với danh sách memories liên quan, được rerank theo relevance score (top-7).
     """
     settings = get_settings()
-    user_id = tool_context.state.get("user_id", "default_user")
+    user_id = get_user_id(tool_context)
 
     try:
         repo = Mem0Repository(get_mem0_client())
@@ -84,7 +85,7 @@ def store_memory(content: str, tool_context: ToolContext) -> dict:
     Returns:
         Dict xác nhận đã lưu thành công hay thất bại.
     """
-    user_id = tool_context.state.get("user_id", "default_user")
+    user_id = get_user_id(tool_context)
 
     try:
         repo = Mem0Repository(get_mem0_client())

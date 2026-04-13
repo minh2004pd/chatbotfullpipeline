@@ -3,6 +3,7 @@
 import structlog
 from google.adk.tools import ToolContext
 
+from app.agents.tools.utils import get_user_id
 from app.core.config import get_settings
 from app.core.database import get_qdrant_client
 from app.repositories.qdrant_repo import QdrantRepository
@@ -33,7 +34,7 @@ def ingest_pdf_artifact(artifact_name: str, tool_context: ToolContext) -> dict:
             - 'message' (str): Mô tả chi tiết lỗi nếu 'success' là False.
     """
     settings = get_settings()
-    user_id = tool_context.state.get("user_id", "default_user")
+    user_id = get_user_id(tool_context)
     document_id = tool_context.state.get("document_id", artifact_name)
 
     try:

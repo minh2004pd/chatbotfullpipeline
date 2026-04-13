@@ -15,6 +15,7 @@ export default function AppLayout() {
   const [mainView, setMainView] = useState<MainView>('chat')
   const toasts = useChatStore((s) => s.toasts)
   const removeToast = useChatStore((s) => s.removeToast)
+  const wikiAccessCount = useChatStore((s) => s.wikiAccessCount)
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#0f0f0f] text-[#f1f1f1] font-sans">
@@ -94,7 +95,7 @@ export default function AppLayout() {
             </button>
             <button
               onClick={() => setMainView('wiki')}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+              className={`relative flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
                 mainView === 'wiki'
                   ? 'bg-[#2a2a2a] text-[#f1f1f1]'
                   : 'text-[#555] hover:text-[#a0a0a0]'
@@ -102,6 +103,11 @@ export default function AppLayout() {
             >
               <Network size={12} />
               Knowledge
+              {wikiAccessCount > 0 && mainView === 'chat' && (
+                <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400 text-[9px] font-bold leading-none">
+                  {wikiAccessCount}
+                </span>
+              )}
             </button>
           </div>
 

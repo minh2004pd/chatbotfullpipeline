@@ -1,3 +1,25 @@
+// ─── Auth types ─────────────────────────────────────────────────────────────────
+
+export interface AuthUser {
+  id: string
+  email: string
+  display_name: string
+  avatar_url: string
+  oauth_provider?: string
+}
+
+export interface AuthResponse {
+  message: string
+  user_id: string
+  email: string
+  display_name: string
+  avatar_url: string
+}
+
+export interface GoogleAuthUrlResponse {
+  url: string
+}
+
 // ─── Chat types ────────────────────────────────────────────────────────────────
 
 export interface Citation {
@@ -26,9 +48,12 @@ export interface ChatRequest {
 }
 
 export interface SSEChunk {
-  content: string
+  content?: string
   done: boolean
   citations?: Citation[]
+  type?: 'wiki_access'
+  tool?: string
+  args?: Record<string, string>
 }
 
 // ─── Document types ─────────────────────────────────────────────────────────────
@@ -203,6 +228,8 @@ export interface ChatStore {
   userId: string
   isStreaming: boolean
   toasts: Toast[]
+  activeWikiNodes: string[]
+  wikiAccessCount: number
 
   addMessage: (message: Message) => void
   updateStreamingMessage: (id: string, content: string) => void
@@ -214,6 +241,8 @@ export interface ChatStore {
   addToast: (toast: Omit<Toast, 'id'>) => void
   removeToast: (id: string) => void
   setIsStreaming: (value: boolean) => void
+  addActiveWikiNode: (key: string) => void
+  clearActiveWikiNodes: () => void
 }
 
 export interface UploadProgress {

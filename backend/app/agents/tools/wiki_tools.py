@@ -12,6 +12,8 @@ Flow đề xuất cho agent:
 import structlog
 from google.adk.tools import ToolContext
 
+from app.agents.tools.utils import get_user_id
+
 logger = structlog.get_logger(__name__)
 
 
@@ -37,7 +39,7 @@ def read_wiki_index(tool_context: ToolContext) -> dict:
         Dict với content (nội dung index.md), page_count (số trang).
         found=False nếu wiki chưa được khởi tạo.
     """
-    user_id = tool_context.state.get("user_id", "default_user")
+    user_id = get_user_id(tool_context)
     logger.info("agent_tool_called", tool="read_wiki_index", user_id=user_id)
 
     try:
@@ -97,7 +99,7 @@ def read_wiki_page(rel_path: str, tool_context: ToolContext) -> dict:
     Returns:
         Dict với content, rel_path, backlinks, is_stub, found.
     """
-    user_id = tool_context.state.get("user_id", "default_user")
+    user_id = get_user_id(tool_context)
     logger.info("agent_tool_called", tool="read_wiki_page", user_id=user_id, rel_path=rel_path)
 
     try:
@@ -167,7 +169,7 @@ def list_wiki_pages(category: str, tool_context: ToolContext) -> dict:
     Returns:
         Dict với category, pages (list filenames), count. found=False nếu không có trang nào.
     """
-    user_id = tool_context.state.get("user_id", "default_user")
+    user_id = get_user_id(tool_context)
     logger.info("agent_tool_called", tool="list_wiki_pages", user_id=user_id, category=category)
 
     valid_categories = ("entities", "topics", "summaries")

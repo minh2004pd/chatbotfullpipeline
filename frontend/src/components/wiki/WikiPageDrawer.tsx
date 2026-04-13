@@ -1,6 +1,10 @@
 import { X, Loader2, AlertCircle } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
+import '@/styles/katex-dark.css'
 import type { WikiGraphNode } from '@/types'
 import { useWikiPage } from '@/hooks/useWikiGraph'
 import { getNodeColor } from '@/utils/wikiNodeColors'
@@ -97,7 +101,8 @@ export default function WikiPageDrawer({ node, onClose, onNavigate }: WikiPageDr
             prose-hr:border-[#2e2e2e]
           ">
             <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
+              remarkPlugins={[remarkGfm, remarkMath]}
+              rehypePlugins={[rehypeKatex]}
               components={{
                 // Render [[pages/...]] wiki links as buttons
                 p: ({ children }) => (

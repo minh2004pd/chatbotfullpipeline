@@ -17,18 +17,23 @@ Sơ đồ dependency graph:
        └── get_chat_service()
 """
 
+import uuid
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from google.adk.runners import Runner
 from mem0 import Memory
 from qdrant_client import QdrantClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.root_agent import get_root_agent
 from app.core.config import Settings, get_settings
 from app.core.database import get_dynamodb_resource, get_mem0_client, get_qdrant_client
+from app.core.database_auth import get_db
+from app.core.security import decode_token
 from app.core.storages import StorageBackend, get_storage
+from app.models.user import User
 from app.repositories.mem0_repo import Mem0Repository
 from app.repositories.qdrant_repo import QdrantRepository
 from app.repositories.wiki_repo import WikiRepository
@@ -42,14 +47,60 @@ from app.services.wiki_service import WikiService
 # --- Auth ---
 
 
-async def get_user_id(x_user_id: str = Header(default="default_user")) -> str:
-    """Lấy user_id từ header X-User-ID."""
-    if not x_user_id or len(x_user_id) > 100:
+async def get_current_user(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Extract user from JWT cookie. Fallback to X-User-ID header (dev mode)."""
+    # Try JWT cookie first
+    token = request.cookies.get("access_token")
+    if token:
+        try:
+            payload = decode_token(token)
+            user_id = payload["sub"]
+            user = await db.get(User, user_id)
+            if user and user.is_active:
+                return user
+        except Exception:
+            pass  # fall through to header
+        # JWT present but user not found → raise 401 (don't silently fallback to default_user)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User không tồn tại hoặc đã bị khóa. Vui lòng đăng nhập lại.",
+        )
+
+    # Backward compat: X-User-ID header (dev mode / API access without auth)
+    x_user_id = request.headers.get("x-user-id")
+    if x_user_id and x_user_id != "default_user":
+        from sqlalchemy import select as sa_select
+
+        result = await db.execute(sa_select(User).where(User.id == x_user_id))
+        user = result.scalar_one_or_none()
+        if user and user.is_active:
+            return user
+
+    # No JWT, no valid X-User-ID → return pseudo-user for unauthenticated access
+    pseudo_id = x_user_id if x_user_id else "default_user"
+    # Validate length to prevent oversized IDs
+    if len(pseudo_id) > 100:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Header X-User-ID không hợp lệ.",
+            detail="X-User-ID header quá dài (tối đa 100 ký tự).",
         )
-    return x_user_id
+    return User(
+        id=pseudo_id,
+        email=pseudo_id,
+        display_name=pseudo_id,
+    )
+
+
+async def get_current_user_id(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> str:
+    """Return user_id as string — drop-in replacement for old get_user_id."""
+    user = await get_current_user(request, db)
+    return str(user.id) if user.id else "default_user"
 
 
 # --- Infrastructure (lru_cache singletons) ---
@@ -175,7 +226,7 @@ def get_wiki_service(
 
 # --- Annotated shorthands (dùng trong endpoint signatures) ---
 
-UserIDDep = Annotated[str, Depends(get_user_id)]
+UserIDDep = Annotated[str, Depends(get_current_user_id)]
 RAGServiceDep = Annotated[RAGService, Depends(get_rag_service)]
 MemoryServiceDep = Annotated[MemoryService, Depends(get_memory_service)]
 DocumentServiceDep = Annotated[DocumentService, Depends(get_document_service)]

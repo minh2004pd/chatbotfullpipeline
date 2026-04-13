@@ -11,6 +11,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.core.database import get_mem0_client, get_qdrant_client
+from app.core.database_auth import get_db
 from app.core.dependencies import get_dynamo_session_service, get_runner
 from app.main import create_app
 
@@ -18,6 +19,21 @@ from app.main import create_app
 @pytest.fixture
 def app():
     instance = create_app()
+
+    # Mock get_db (PostgreSQL) — return a no-op async session for tests
+    mock_db = AsyncMock()
+    mock_db.get = AsyncMock(return_value=None)
+    mock_db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
+    mock_db.flush = AsyncMock()
+    mock_db.refresh = AsyncMock()
+    mock_db.commit = AsyncMock()
+    mock_db.rollback = AsyncMock()
+
+    async def override_get_db():
+        yield mock_db
+
+    instance.dependency_overrides[get_db] = override_get_db
+
     yield instance
     # Dọn overrides sau mỗi test
     instance.dependency_overrides.clear()

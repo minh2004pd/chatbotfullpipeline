@@ -10,6 +10,8 @@ from app.core.database import get_qdrant_client
 from app.repositories.qdrant_repo import QdrantRepository
 from app.utils.gemini_utils import get_query_embedding
 
+from app.agents.tools.utils import get_user_id
+
 logger = structlog.get_logger(__name__)
 
 
@@ -45,7 +47,7 @@ async def search_documents(query: str, tool_context: ToolContext) -> dict:
         Trả về found=False nếu không có kết quả vượt score threshold.
     """
     settings = get_settings()
-    user_id = tool_context.state.get("user_id")
+    user_id = get_user_id(tool_context)
 
     try:
         repo = QdrantRepository(get_qdrant_client())

@@ -24,6 +24,7 @@ import asyncio
 import json
 import re
 import unicodedata
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -35,6 +36,16 @@ from app.repositories.wiki_repo import WikiRepository
 from app.utils.gemini_utils import _with_retry, get_genai_client
 
 logger = structlog.get_logger(__name__)
+
+
+@dataclass
+class _ChunkExtraction:
+    """Result of extracting topics from one chunk."""
+
+    chunk_index: int
+    items: list[dict]  # entities + topics từ _extract_topics()
+    chunk_text: str  # original chunk text
+
 
 # asyncio.Lock per page path để tránh race condition khi 2 ingestions cùng update 1 trang
 _page_locks: dict[str, asyncio.Lock] = {}
@@ -286,94 +297,211 @@ class WikiService:
             content=raw_text,
         )
 
-        # 2. Extract topics
-        truncated = raw_text[: self._settings.wiki_max_text_chars]
-        topics = await self._extract_topics(text=truncated, source_name=source_name)
-        if not topics:
-            logger.warning("wiki_no_topics_extracted", source_id=source_id)
-            return
+        # 2. Split text thành chunks
+        chunks = _split_text_for_extraction(raw_text, self._settings.wiki_chunk_size)
 
-        # 3. Synthesize / update pages — tách riêng entities, topics, summaries
-        entities = [t for t in topics if t.get("category") == "entities"]
-        topic_items = [t for t in topics if t.get("category") == "topics"]
-        summary_items = [t for t in topics if t.get("category") == "summaries"]
+        # ── Phase 1: MAP — Parallel Extraction ────────────────────────────────
+        semaphore_extract = asyncio.Semaphore(self._settings.wiki_max_parallel_extractions)
 
-        pages_to_process = (
-            entities[: self._settings.wiki_max_entities_per_source]
-            + topic_items[: self._settings.wiki_max_topics_per_source]
-            + summary_items  # luôn xử lý tất cả summaries (thường chỉ 1 per source)
+        async def _extract_chunk(idx: int, text: str) -> _ChunkExtraction:
+            async with semaphore_extract:
+                items = await self._extract_topics(text=text, source_name=source_name)
+                return _ChunkExtraction(chunk_index=idx, items=items, chunk_text=text)
+
+        # return_exceptions=True: nếu 1 chunk lỗi, các chunk khác vẫn tiếp tục
+        raw_results = await asyncio.gather(
+            *[_extract_chunk(i, chunk) for i, chunk in enumerate(chunks)],
+            return_exceptions=True,
         )
 
-        processed_paths: set[str] = set()
-        for i, topic in enumerate(pages_to_process):
-            slug = topic.get("slug", "")
-            category = topic.get("category", "summaries")
-            title = topic.get("title", slug)
-            topic_type = topic.get("type", "")  # chỉ entities có type (model/method/...)
+        # Lọc kết quả thành công, log lỗi các chunk thất bại
+        extractions: list[_ChunkExtraction] = []
+        for i, result in enumerate(raw_results):
+            if isinstance(result, Exception):
+                logger.warning(
+                    "wiki_extraction_chunk_failed",
+                    user_id=user_id,
+                    source=source_name,
+                    chunk_index=i,
+                    error=str(result),
+                )
+            else:
+                extractions.append(result)
+
+        if not extractions:
+            # Tất cả chunks lỗi → fallback toàn bộ
+            logger.error(
+                "wiki_extraction_all_chunks_failed",
+                user_id=user_id,
+                source=source_name,
+            )
+            extractions = [
+                _ChunkExtraction(
+                    chunk_index=0,
+                    items=[
+                        {"slug": _slugify(source_name), "category": "entities", "title": source_name, "type": ""},
+                        {
+                            "slug": ("topic-" + _slugify(source_name))[:60],
+                            "category": "topics",
+                            "title": f"Chủ đề: {source_name}",
+                        },
+                        {"slug": _slugify(source_name), "category": "summaries", "title": f"Tóm tắt: {source_name}"},
+                    ],
+                    chunk_text=raw_text[: self._settings.wiki_chunk_size],
+                )
+            ]
+
+        # Sort by chunk_index để đảm bảo thứ tự
+        extractions = sorted(extractions, key=lambda e: e.chunk_index)
+
+        logger.info(
+            "wiki_map_phase_done",
+            user_id=user_id,
+            source=source_name,
+            chunks=len(chunks),
+            extractions=len(extractions),
+            failed=len(chunks) - len(extractions),
+        )
+
+        # ── Phase 2: REDUCE — Merge & Deduplicate ─────────────────────────────
+        deduped_items = _reduce_extractions(
+            extractions,
+            source_name,
+            self._settings.wiki_max_entities_per_source,
+            self._settings.wiki_max_topics_per_source,
+        )
+
+        slug_to_chunks = _build_slug_to_chunks(
+            extractions,
+            deduped_items,
+            self._settings.wiki_synthesis_max_text_per_page,
+        )
+
+        # Count entities và topics để logging
+        total_entities = sum(1 for item in deduped_items if item["category"] == "entities")
+        total_topics = sum(1 for item in deduped_items if item["category"] == "topics")
+        has_summary = any(item["category"] == "summaries" for item in deduped_items)
+
+        # Build danh sách pages cần synthesize
+        pages_to_synthesize: list[tuple[dict, str, str]] = []  # (item, existing_content, merged_text)
+        all_processed_paths: set[str] = set()
+
+        for item in deduped_items:
+            slug = item.get("slug", "")
+            category = item.get("category", "summaries")
             if not slug:
                 continue
-            # Throttle nhỏ giữa các LLM calls để tránh burst 503
-            if i > 0:
-                await asyncio.sleep(0.5)
+
             rel_path = f"pages/{category}/{slug}.md"
-            async with _get_page_lock(user_id, rel_path):
-                existing = self._repo.read_page(user_id=user_id, rel_path=rel_path) or ""
+            existing = self._repo.read_page(user_id=user_id, rel_path=rel_path) or ""
+
+            # Merge tất cả chunks liên quan thành 1 text cho page này
+            chunk_texts = slug_to_chunks.get(slug, [""])
+            merged_text = "\n\n".join(chunk_texts) if chunk_texts else ""
+
+            pages_to_synthesize.append((item, existing, merged_text))
+
+        logger.info(
+            "wiki_reduce_phase_done",
+            user_id=user_id,
+            source=source_name,
+            pages_to_synthesize=len(pages_to_synthesize),
+            entities=total_entities,
+            topics=total_topics,
+        )
+
+        # ── Phase 3: PARALLEL SYNTHESIS ───────────────────────────────────────
+        semaphore_synth = asyncio.Semaphore(self._settings.wiki_max_parallel_synthesis)
+
+        async def _synthesize_one_page(
+            item: dict, existing: str, merged_text: str
+        ) -> tuple[str, str | None]:
+            """Synthesize 1 page, trả về (rel_path, new_content_or_None)."""
+            async with semaphore_synth:
+                slug = item.get("slug", "")
+                category = item.get("category", "summaries")
+                title = item.get("title", slug)
+                topic_type = item.get("type", "")
+                rel_path = f"pages/{category}/{slug}.md"
+
                 new_content = await self._synthesize_page(
                     user_id=user_id,
                     existing_content=existing,
-                    new_text=truncated,
+                    new_text=merged_text,  # merged từ TẤT CẢ chunks liên quan
                     topic_title=title,
                     topic_type=topic_type,
                     source_name=source_name,
                     source_id=source_id,
                 )
-                if new_content:
+                return (rel_path, new_content)
+
+        # Chạy synthesis song song
+        synthesis_results = await asyncio.gather(
+            *[_synthesize_one_page(item, existing, merged_text) for item, existing, merged_text in pages_to_synthesize]
+        )
+
+        # Ghi kết quả vào wiki + update link index + ghost stubs
+        ghost_stub_tasks = []
+        link_index_tasks = []
+
+        for rel_path, new_content in synthesis_results:
+            if new_content:
+                async with _get_page_lock(user_id, rel_path):
                     self._repo.write_page(user_id=user_id, rel_path=rel_path, content=new_content)
-                    processed_paths.add(rel_path)
+                    all_processed_paths.add(rel_path)
                     logger.info("wiki_page_updated", user_id=user_id, path=rel_path)
-                    # Cập nhật forward links cho trang vừa viết
-                    await self._update_link_index(
-                        user_id=user_id,
-                        rel_path=rel_path,
-                        new_links=_extract_wiki_links(new_content),
-                    )
-                    # Tạo stub cho [[slug]] chưa tồn tại
-                    await self._create_ghost_stubs(
+
+                # Cập nhật forward links + tạo ghost stubs (batch sau)
+                links = _extract_wiki_links(new_content)
+                link_index_tasks.append(
+                    self._update_link_index(user_id=user_id, rel_path=rel_path, new_links=links)
+                )
+                ghost_stub_tasks.append(
+                    self._create_ghost_stubs(
                         user_id=user_id,
                         content=new_content,
                         source_id=source_id,
                         source_name=source_name,
                     )
+                )
 
-        # 4. Update related pages (pages hiện có đang link đến entities vừa extract)
+        # Batch ghost stubs + link index updates
+        if link_index_tasks:
+            await asyncio.gather(*link_index_tasks)
+        if ghost_stub_tasks:
+            await asyncio.gather(*ghost_stub_tasks)
+
+        # ── Phase 4: FINALIZATION ─────────────────────────────────────────────
+        # Update related pages
         related_updated = await self._update_related_pages(
             user_id=user_id,
             source_id=source_id,
             source_name=source_name,
-            raw_text=truncated,
-            processed_paths=processed_paths,
+            raw_text=raw_text,
+            processed_paths=all_processed_paths,
         )
 
-        # 5. Rebuild index + link index (rule-based, đảm bảo consistency)
+        # Rebuild index + link index (1 lần cuối)
         self._rebuild_index(user_id=user_id)
         self._rebuild_link_index(user_id=user_id)
 
-        # 6. Log
+        # Log
         self._repo.append_log(
             user_id=user_id,
             entry=(
                 f"## [{_now_iso()}] INGEST | {raw_category} | {source_name} | "
-                f"entities={len(entities)} topics={len(topic_items)} summaries={len(summary_items)} "
-                f"related_updated={related_updated}"
+                f"chunks={len(chunks)} entities={total_entities} topics={total_topics} "
+                f"summaries={1 if has_summary else 0} related_updated={related_updated}"
             ),
         )
         logger.info(
             "wiki_process_done",
             user_id=user_id,
             source=source_name,
-            entities=len(entities),
-            topics=len(topic_items),
-            summaries=len(summary_items),
+            chunks=len(chunks),
+            entities=total_entities,
+            topics=total_topics,
+            summaries=1 if has_summary else 0,
             related_updated=related_updated,
         )
 
@@ -598,7 +726,11 @@ class WikiService:
                 _parse_frontmatter_title(content)
                 or filename.replace(".md", "").replace("-", " ").title()
             )
-            line = f"- [[{rel_path}]] — {title}"
+            summary = _extract_page_summary(content)
+            if summary:
+                line = f"- [[{rel_path}]] — **{title}** — {summary}"
+            else:
+                line = f"- [[{rel_path}]] — **{title}**"
             sections.get(category, sections["summaries"]).append(line)
 
         lines = ["# Wiki Index\n"]
@@ -796,6 +928,217 @@ class WikiService:
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
+def _split_text_for_extraction(text: str, chunk_size: int) -> list[str]:
+    """Split text thành chunks ~chunk_size chars tại paragraph/sentence boundaries.
+
+    Ưu tiên split tại \n\n (paragraph), fallback tại .!? (sentence),
+    cuối cùng fallback tại chunk_size cứng.
+    Đảm bảo không bỏ sót nội dung.
+    """
+    if len(text) <= chunk_size:
+        return [text]
+
+    chunks: list[str] = []
+    start = 0
+    while start < len(text):
+        end = start + chunk_size
+        if end >= len(text):
+            chunks.append(text[start:])
+            break
+
+        # Ưu tiên split tại paragraph boundary
+        paragraph_pos = text.rfind("\n\n", start, end)
+        # Fallback: sentence boundary
+        sentence_pos = -1
+        for punct in (". ", "! ", "? ", "\n"):
+            pos = text.rfind(punct, start, end)
+            if pos > paragraph_pos:
+                sentence_pos = max(sentence_pos, pos + 1)
+
+        if paragraph_pos > start + chunk_size // 2:
+            split_at = paragraph_pos + 2  # skip \n\n
+        elif sentence_pos > start + chunk_size // 2:
+            split_at = sentence_pos
+        else:
+            split_at = end  # hard cut
+
+        chunks.append(text[start:split_at].strip())
+        start = split_at
+
+    return [c for c in chunks if c.strip()]
+
+
+def _reduce_extractions(
+    extractions: list[_ChunkExtraction],
+    source_name: str,
+    max_entities: int,
+    max_topics: int,
+) -> list[dict]:
+    """Merge và deduplicate extraction results từ nhiều chunks.
+
+    - Flatten tất cả items từ extractions (sorted by chunk_index)
+    - Deduplicate entities/topics by slug: "longer chunk wins" — metadata từ chunk
+      dài hơn được ưu tiên (heuristic: chunk dài hơn = định nghĩa chi tiết hơn,
+      thường ở Methodology thay vì Introduction)
+    - Apply global limits (max_entities, max_topics)
+    - Luôn tạo 1 summary từ source_name
+    - Fallback entities/topics nếu empty
+    """
+    # Group items by (category, slug) để so sánh
+    # Key: (category, slug) → list of (item, chunk_text_length)
+    slug_groups: dict[tuple[str, str], list[tuple[dict, int]]] = {}
+
+    # Sort by chunk_index để đảm bảo thứ tự ổn định
+    sorted_extractions = sorted(extractions, key=lambda e: e.chunk_index)
+
+    for extraction in sorted_extractions:
+        chunk_len = len(extraction.chunk_text)
+        for item in extraction.items:
+            category = item.get("category", "")
+            slug = item.get("slug", "")
+            if not slug or category not in ("entities", "topics"):
+                continue
+            key = (category, slug)
+            slug_groups.setdefault(key, []).append((item, chunk_len))
+
+    # Chọn metadata: "longer chunk wins" — nếu cùng slug, lấy item từ chunk dài nhất
+    best_entity_items: list[dict] = []
+    best_topic_items: list[dict] = []
+
+    for (category, slug), instances in slug_groups.items():
+        # Sort by chunk length descending → "longer wins"
+        instances.sort(key=lambda x: x[1], reverse=True)
+        best_item = instances[0][0]  # item từ chunk dài nhất
+
+        if category == "entities":
+            best_entity_items.append(best_item)
+        else:
+            best_topic_items.append(best_item)
+
+    # Apply global limits — giữ nguyên thứ tự xuất hiện (theo chunk_index của best instance)
+    entities = best_entity_items[:max_entities]
+    topics = best_topic_items[:max_topics]
+
+    # Fallback: đảm bảo luôn có ít nhất 1 entity và 1 topic
+    if not entities:
+        entities.append(
+            {
+                "slug": _slugify(source_name),
+                "category": "entities",
+                "title": source_name,
+                "type": "",
+            }
+        )
+        logger.warning("wiki_no_entities_after_reduce", source=source_name)
+
+    if not topics:
+        topics.append(
+            {
+                "slug": ("topic-" + _slugify(source_name))[:60],
+                "category": "topics",
+                "title": f"Chủ đề: {source_name}",
+            }
+        )
+        logger.warning("wiki_no_topics_after_reduce", source=source_name)
+
+    # Summary: luôn có đúng 1
+    summary = {
+        "slug": _slugify(source_name),
+        "category": "summaries",
+        "title": f"Tóm tắt: {source_name}",
+    }
+
+    return entities + topics + [summary]
+
+
+def _build_slug_to_chunks(
+    extractions: list[_ChunkExtraction],
+    deduped_items: list[dict],
+    max_text_per_page: int,
+) -> dict[str, list[str]]:
+    """Map slug → list of chunk texts mention nó.
+
+    - Greedily add chunks cho đến khi vượt max_text_per_page
+    - Luôn include ít nhất 1 chunk
+    """
+    # Build set of slugs we care about
+    target_slugs = {item["slug"] for item in deduped_items}
+
+    # Map slug → list of chunk texts
+    slug_to_chunks: dict[str, list[str]] = {slug: [] for slug in target_slugs}
+
+    # Sort extractions by chunk_index
+    sorted_extractions = sorted(extractions, key=lambda e: e.chunk_index)
+
+    for extraction in sorted_extractions:
+        for item in extraction.items:
+            slug = item.get("slug", "")
+            if slug in target_slugs:
+                current_total = sum(len(t) for t in slug_to_chunks[slug])
+                # Always include at least 1 chunk
+                if not slug_to_chunks[slug] or current_total + len(extraction.chunk_text) <= max_text_per_page:
+                    slug_to_chunks[slug].append(extraction.chunk_text)
+
+    return slug_to_chunks
+
+
+def _merge_extraction_results(all_topics: list[dict], source_name: str) -> list[dict]:
+    """Merge extraction results từ nhiều chunks.
+
+    - Entities: deduplicate by slug, giữ lại phần tử đầu tiên
+    - Topics: deduplicate by slug, giữ lại phần tử đầu tiên
+    - Summary: luôn giữ 1 (từ source_name, không phụ thuộc chunk)
+    """
+    seen_entities: set[str] = set()
+    seen_topics: set[str] = set()
+    entities: list[dict] = []
+    topics: list[dict] = []
+
+    for item in all_topics:
+        category = item.get("category", "")
+        slug = item.get("slug", "")
+        if not slug:
+            continue
+
+        if category == "entities" and slug not in seen_entities:
+            seen_entities.add(slug)
+            entities.append(item)
+        elif category == "topics" and slug not in seen_topics:
+            seen_topics.add(slug)
+            topics.append(item)
+
+    # Đảm bảo luôn có ít nhất 1 entity và 1 topic
+    if not entities:
+        entities.append(
+            {
+                "slug": _slugify(source_name),
+                "category": "entities",
+                "title": source_name,
+                "type": "",
+            }
+        )
+        logger.warning("wiki_no_entities_after_merge", source=source_name)
+
+    if not topics:
+        topics.append(
+            {
+                "slug": ("topic-" + _slugify(source_name))[:60],
+                "category": "topics",
+                "title": f"Chủ đề: {source_name}",
+            }
+        )
+        logger.warning("wiki_no_topics_after_merge", source=source_name)
+
+    # Summary: luôn có đúng 1
+    summary = {
+        "slug": _slugify(source_name),
+        "category": "summaries",
+        "title": f"Tóm tắt: {source_name}",
+    }
+
+    return entities + topics + [summary]
+
+
 def _strip_code_fence(text: str) -> str:
     """Bỏ code fence wrapper nếu LLM bọc output trong ```markdown``` block."""
     if not text.startswith("```"):
@@ -808,6 +1151,25 @@ def _strip_code_fence(text: str) -> str:
     if lines and lines[-1].strip() == "```":
         lines = lines[:-1]
     return "\n".join(lines).strip()
+
+
+def _extract_page_summary(content: str, max_len: int = 120) -> str:
+    """Extract 1-line summary from page content (first paragraph after frontmatter).
+
+    Skips frontmatter, title header, and blockquotes.
+    """
+    # Strip frontmatter
+    body = re.sub(r"^---\s*\n.*?\n---", "", content.strip(), flags=re.DOTALL).strip()
+    # Strip title header (# ...)
+    body = re.sub(r"^#\s+.*$", "", body, flags=re.MULTILINE).strip()
+    # Take first non-empty, non-quote, non-header line
+    for line in body.splitlines():
+        line = line.strip()
+        if line and not line.startswith(">") and not line.startswith("#"):
+            if len(line) > max_len:
+                return line[:max_len] + "..."
+            return line
+    return ""
 
 
 def _slugify(text: str) -> str:
@@ -839,6 +1201,16 @@ def _parse_frontmatter_title(content: str) -> str:
         title_match = re.search(r"^title:\s*(.+)$", fm, re.MULTILINE)
         if title_match:
             return title_match.group(1).strip().strip("\"'")
+    return ""
+
+
+def _parse_frontmatter_type(content: str) -> str:
+    """Lấy type từ YAML frontmatter."""
+    fm = _parse_frontmatter(content)
+    if fm:
+        type_match = re.search(r"^type:\s*(.+)$", fm, re.MULTILINE)
+        if type_match:
+            return type_match.group(1).strip().strip("\"'")
     return ""
 
 

@@ -3,6 +3,7 @@
 import structlog
 from google.adk.tools import ToolContext
 
+from app.agents.tools.utils import get_user_id
 from app.core.config import get_settings
 from app.core.database import get_dynamodb_resource, get_qdrant_client
 from app.repositories.meeting_repo import MeetingRepository
@@ -28,7 +29,7 @@ def list_meetings(tool_context: ToolContext) -> dict:
         duration_ms, speakers, utterance_count. Trả về found=False nếu chưa có cuộc họp nào.
     """
     settings = get_settings()
-    user_id = tool_context.state.get("user_id", "default_user")
+    user_id = get_user_id(tool_context)
 
     try:
         resource = get_dynamodb_resource()
@@ -92,7 +93,7 @@ def search_meeting_transcripts(query: str, tool_context: ToolContext) -> str:
         Trả về thông báo không tìm thấy nếu không có kết quả vượt score threshold.
     """
     settings = get_settings()
-    user_id = tool_context.state.get("user_id", "default_user")
+    user_id = get_user_id(tool_context)
 
     try:
         rag_service = TranscriptRAGService(get_qdrant_client())

@@ -5,11 +5,10 @@ import {
   Brain,
   ChevronDown,
   ChevronRight,
-  Edit3,
-  Check,
-  X,
+  LogOut,
   MessageSquare,
 } from 'lucide-react'
+import { useAuthStore } from '@/store/authStore'
 import { useChatStore } from '@/store/chatStore'
 import DocumentPanel from '@/components/documents/DocumentPanel'
 import MemoryPanel from '@/components/memory/MemoryPanel'
@@ -18,12 +17,11 @@ import SessionList from '@/components/chat/SessionList'
 type Section = 'sessions' | 'documents' | 'memory'
 
 export default function Sidebar() {
-  const { userId, setUserId, resetSession } = useChatStore()
+  const { user, logout } = useAuthStore()
+  const { resetSession } = useChatStore()
   const [openSections, setOpenSections] = useState<Set<Section>>(
     new Set(['sessions', 'documents']),
   )
-  const [editingUser, setEditingUser] = useState(false)
-  const [userIdInput, setUserIdInput] = useState(userId)
 
   const toggleSection = (section: Section) => {
     setOpenSections((prev) => {
@@ -34,78 +32,45 @@ export default function Sidebar() {
     })
   }
 
-  const handleSaveUserId = () => {
-    const trimmed = userIdInput.trim()
-    if (trimmed) {
-      setUserId(trimmed)
-      resetSession()
-    }
-    setEditingUser(false)
-  }
-
-  const handleCancelEdit = () => {
-    setUserIdInput(userId)
-    setEditingUser(false)
+  const handleLogout = async () => {
+    await logout()
+    resetSession()
   }
 
   return (
     <div className="flex flex-col h-full">
       {/* Phần trên: User + Documents + Memory — cố định, không bị đẩy */}
       <div className="flex-shrink-0">
-        {/* User ID section */}
+        {/* User section */}
         <div className="px-3 py-3 border-b border-[#2e2e2e]">
-          <div className="flex items-center gap-2 mb-1.5">
-            <div className="w-7 h-7 rounded-full bg-violet-900/60 border border-violet-700/50 flex items-center justify-center flex-shrink-0">
-              <User size={13} className="text-violet-400" />
-            </div>
-            <span className="text-xs text-[#666] font-medium uppercase tracking-wider">
-              User
-            </span>
-          </div>
-
-          {editingUser ? (
-            <div className="flex items-center gap-1.5 mt-2">
-              <input
-                value={userIdInput}
-                onChange={(e) => setUserIdInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleSaveUserId()
-                  if (e.key === 'Escape') handleCancelEdit()
-                }}
-                autoFocus
-                className="flex-1 bg-[#1a1a1a] border border-violet-700/60 rounded-md px-2.5 py-1.5 text-xs text-[#f1f1f1] outline-none focus:border-violet-500 transition-colors"
-                placeholder="user_id"
+          <div className="flex items-center gap-2.5">
+            {user?.avatar_url ? (
+              <img
+                src={user.avatar_url}
+                alt={user.display_name}
+                className="w-7 h-7 rounded-full flex-shrink-0 object-cover"
               />
-              <button
-                onClick={handleSaveUserId}
-                className="p-1.5 text-violet-400 hover:text-violet-300 hover:bg-violet-900/30 rounded transition-colors"
-              >
-                <Check size={13} />
-              </button>
-              <button
-                onClick={handleCancelEdit}
-                className="p-1.5 text-[#666] hover:text-[#a0a0a0] hover:bg-[#2a2a2a] rounded transition-colors"
-              >
-                <X size={13} />
-              </button>
+            ) : (
+              <div className="w-7 h-7 rounded-full bg-violet-900/60 border border-violet-700/50 flex items-center justify-center flex-shrink-0">
+                <User size={13} className="text-violet-400" />
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <div className="text-sm text-[#f1f1f1] font-medium truncate">
+                {user?.display_name || 'User'}
+              </div>
+              <div className="text-[10px] text-[#555] truncate">
+                {user?.email || ''}
+              </div>
             </div>
-          ) : (
-            <div className="flex items-center gap-1.5 group">
-              <span className="text-sm text-[#f1f1f1] font-medium truncate flex-1 pl-0.5">
-                {userId}
-              </span>
-              <button
-                onClick={() => {
-                  setUserIdInput(userId)
-                  setEditingUser(true)
-                }}
-                className="p-1 text-[#444] hover:text-[#a0a0a0] opacity-0 group-hover:opacity-100 transition-all rounded"
-                title="Edit user ID"
-              >
-                <Edit3 size={12} />
-              </button>
-            </div>
-          )}
+            <button
+              onClick={handleLogout}
+              className="p-1 text-[#444] hover:text-red-400 hover:bg-red-400/10 rounded transition-colors flex-shrink-0"
+              title="Đăng xuất"
+            >
+              <LogOut size={13} />
+            </button>
+          </div>
         </div>
 
         {/* Documents section */}

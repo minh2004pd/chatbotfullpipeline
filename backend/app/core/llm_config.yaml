@@ -105,7 +105,7 @@ prompts:
       **Phân biệt với concept**: method = quy trình/algorithm CỤ THỂ có thể implement được; concept = ý tưởng/kiến trúc tổng quát.
     - **concept**: kiến trúc/paradigm tổng quát, không phải một method cụ thể:
       Transformer architecture, Attention mechanism, Diffusion process, GAN training, Contrastive Learning paradigm, In-context Learning, Few-shot Learning, Zero-shot Learning, Transfer Learning, Multi-task Learning, Meta-learning, Mixture of Experts (MoE), Retrieval-Augmented Generation (concept), Agentic AI (paradigm)
-    Không bỏ sót entity nào. Nếu không có entity nào thì để mảng rỗng [].
+    Không bỏ sót entity nào. Bắt buộc phải có ít nhất 1 entity.
 
     ### topics (ÍT NHẤT 1, tối đa {max_topics}, chọn quan trọng nhất):
     Các CHỦ ĐỀ NGHIÊN CỨU cấp độ cao — vấn đề/hướng nghiên cứu đang được giải quyết:
@@ -116,7 +116,7 @@ prompts:
     - **GenAI**: "Text-to-Image Consistency", "Video Generation Coherence", "Controllable Generation", "Multimodal Generation"
     - **Efficient ML**: "Model Compression", "Inference Optimization", "Parameter-efficient Fine-tuning"
     - **Cross-domain**: "Foundation Models", "Transfer Learning", "Self-supervised Learning"
-    KHÔNG trùng lặp với entities. Nếu không có thì để mảng rỗng [].
+    KHÔNG trùng lặp với entities. Bắt buộc phải có ít nhất 1 topic.
 
     ### summary (luôn có đúng 1):
     Slug = slugify của source_name, title = "Tóm tắt: {source_name}"
@@ -146,6 +146,15 @@ prompts:
     {new_text}
 
     Yêu cầu output (chỉ Markdown thuần, KHÔNG bọc trong code fence ```, không có text giải thích ngoài):
+
+    ⚠️ QUY TẮC CHÍNH XÁC (bắt buộc — ưu tiên hơn mọi quy tắc khác):
+    1. KHÔNG bịa số liệu: Mọi con số (accuracy, F1, BLEU, params, FLOPs, latency...) PHẢI có trong `new_text` hoặc `existing_content`. Không được tự suy ra.
+    2. Giữ nguyên số liệu: KHÔNG làm tròn, KHÔNG đổi đơn vị, KHÔNG sửa decimal places. "93.7%" → giữ nguyên "93.7%".
+    3. Công thức: Copy chính xác từ nguồn. KHÔNG sửa ký hiệu, KHÔNG đổi notation.
+    4. Nếu không chắc: Thà bỏ trống hoặc ghi "(số liệu không có trong nguồn)" còn hơn bịa.
+    5. Đối chiếu trước khi viết: Mỗi claim có số liệu → kiểm tra lại trong nguồn có đúng không.
+    6. **MERGE, KHÔNG REPLACE**: Giữ TOÀN BỘ nội dung hiện tại trong wiki. `new_text` chứa TẤT CẢ đoạn văn từ paper có đề cập đến topic này — viết thành trang tổng hợp đầy đủ, không bỏ sót section nào. KHÔNG xóa, KHÔNG viết lại sections đã có nếu không có mâu thuẫn trực tiếp.
+    7. **One-pass synthesis**: Trang này chỉ được synthesize 1 lần duy nhất với toàn bộ nội dung liên quan. Viết đầy đủ, chi tiết ngay từ đầu — đừng viết tóm tắt hay placeholder.
 
     Bắt đầu bằng YAML frontmatter:
     ---
@@ -214,9 +223,39 @@ prompts:
     Mục đích, domain, scale (số samples/classes/tokens).
     ## Cấu trúc & Format
     Split (train/val/test), annotation type, evaluation metric.
-    ## Được dùng để đánh giá gì
+    ## Bảng so sánh kết quả
+    Dùng Markdown table để tổng hợp kết quả từ nhiều sources:
+    | Model | Score | Year | Source |
+    |-------|-------|------|--------|
+    Thêm các kết quả mới vào bảng, GIỮ NGUYÊN kết quả cũ từ các sources trước.
+    Mỗi row ghi rõ source paper trong cột Source (ví dụ: "paper-vit.pdf").
+    ## Trend Analysis
+    1-2 câu phân tích xu hướng dựa trên bảng kết quả (ví dụ: "Từ 2024, các mô hình bắt đầu chuyển sang kiến trúc X, cải thiện Y% trên benchmark này").
+    ## Được dùng để đánh giá
     Tasks, models đã được benchmark trên đây.
     ## Hạn chế & Bias đã biết
+
+    ---
+
+    **Cho entity loại concept (khi có công thức toán học):**
+    ## Định nghĩa
+    Là gì, thuộc lĩnh vực nào (NLP/CV/RL/GenAI), giải quyết vấn đề gì ở mức paradigm.
+    ## Nguyên lý cốt lõi
+    Key ideas, mathematical intuition (không cần implement-level detail).
+    ### Công thức
+    $$
+    ... LaTeX formula ...
+    $$
+    **Giải thích biến số:**
+    - $\alpha$ = learning rate
+    - $d$ = model dimension
+    - ... (giải thích từng biến trong công thức)
+    ## Ứng dụng chính
+    Được dùng trong loại model/system nào.
+    ## Methods cụ thể thuộc concept này
+    [[pages/entities/method-slug.md]] — các method cụ thể implement concept này.
+    ## Entities liên quan
+    [[pages/entities/slug.md]] — models, frameworks, papers tiêu biểu.
 
     ---
 

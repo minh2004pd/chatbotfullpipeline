@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import AuthGuard from '@/components/auth/AuthGuard'
 import AppLayout from '@/components/layout/AppLayout'
 
 const queryClient = new QueryClient({
@@ -17,7 +18,9 @@ const queryClient = new QueryClient({
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AppLayout />
+      <AuthGuard>
+        <AppLayout />
+      </AuthGuard>
     </QueryClientProvider>
   )
 }

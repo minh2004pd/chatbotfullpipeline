@@ -20,6 +20,8 @@ export function useChat() {
     resetSession,
     addToast,
     setIsStreaming,
+    addActiveWikiNode,
+    clearActiveWikiNodes,
   } = useChatStore()
 
   const queryClient = useQueryClient()
@@ -84,6 +86,9 @@ export function useChat() {
 
       const collectedCitations: Citation[] = []
 
+      // Clear wiki nodes từ stream trước
+      clearActiveWikiNodes()
+
       await streamChat({
         request: {
           message: text.trim(),
@@ -110,6 +115,16 @@ export function useChat() {
           finalizeStreamingMessage(assistantMsgId, undefined)
           addToast({ type: 'error', message: error })
         },
+        onWikiAccess: (tool, args) => {
+          if (args.rel_path) {
+            // "pages/entities/lora.md" → "entities/lora"
+            const parts = args.rel_path.replace('.md', '').split('/')
+            const key = parts.length >= 3 ? `${parts[1]}/${parts[2]}` : args.rel_path
+            addActiveWikiNode(key)
+          } else if (tool === 'read_wiki_index') {
+            // read_wiki_index đọc tất cả — không highlight node cụ thể
+          }
+        },
         signal: controller.signal,
       })
     },
@@ -124,6 +139,8 @@ export function useChat() {
       finalizeStreamingMessage,
       addToast,
       setIsStreaming,
+      addActiveWikiNode,
+      clearActiveWikiNodes,
     ],
   )
 

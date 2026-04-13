@@ -17,6 +17,24 @@ services:
     command: "-jar DynamoDBLocal.jar -inMemory -sharedDb"
     restart: unless-stopped
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: memrag-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: memrag
+      POSTGRES_USER: memrag
+      POSTGRES_PASSWORD: memrag
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memrag -d memrag"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   backend:
     build: ./backend
     container_name: memrag-backend
@@ -25,11 +43,13 @@ services:
     depends_on:
       - qdrant
       - dynamodb-local
+      - postgres
     env_file:
       - .env
     environment:
       - QDRANT_URL=http://qdrant:6333
       - DYNAMODB_ENDPOINT_URL=http://dynamodb-local:8000
+      - DATABASE_URL=postgresql+asyncpg://memrag:memrag@postgres:5432/memrag
     volumes:
       - uploads_data:/app/uploads
     restart: unless-stopped
@@ -37,6 +57,7 @@ services:
 volumes:
   qdrant_data:
   uploads_data:
+  postgres_data:
 
 # http://0.0.0.0:8000/docs
 # http://localhost:6333/dashboard

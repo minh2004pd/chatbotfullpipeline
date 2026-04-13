@@ -243,6 +243,12 @@ Chưa có trang Wiki nào. Hệ thống sẽ tự động tạo trang khi bạn 
 ## Entities
 _(chưa có)_
 
+## Benchmarks
+_(chưa có)_
+
+## Mathematical Foundations
+_(chưa có)_
+
 ## Topics
 _(chưa có)_
 
@@ -297,6 +303,20 @@ Trang về CHỦ ĐỀ NGHIÊN CỨU cấp độ cao — vấn đề/hướng đ
 Tóm tắt chuyên sâu từng paper/nguồn đơn lẻ:
 - Mỗi document/meeting có đúng **1 summary page**
 - Format: TL;DR → Đóng góp chính → Phương pháp → Kết quả → Hạn chế → Future work
+
+### Benchmarks (trong entities/, type: benchmark)
+Trang so sánh kết quả nhiều models trên cùng dataset/benchmark:
+- **Bảng so sánh** (Markdown table): | Model | Score | Year | Source |
+- Agent tự động cập nhật khi ingest paper mới có kết quả trên cùng benchmark
+- **Trend Analysis**: 1-2 câu phân tích xu hướng dựa trên bảng kết quả
+- Công thức đánh giá (nếu có): dùng $$...$$ cho LaTeX, kèm giải thích biến số
+
+### Mathematical Foundations (trong entities/, type: concept)
+Trang chứa công thức toán học dùng chung cho nhiều papers/methods:
+- Dùng $$...$$ cho display math, $...$ cho inline math
+- Luôn kèm **Giải thích biến số** sau mỗi công thức
+- Mục đích: agent có thể tra cứu derivation/proof thay vì lặp lại trong nhiều pages
+- Ví dụ: Cross-entropy loss, Attention formula, Diffusion forward/reverse process
 
 ## Format mỗi trang
 

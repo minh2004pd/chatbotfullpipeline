@@ -1,16 +1,5 @@
 import axios from 'axios'
 
-const USER_ID_KEY = 'memrag_user_id'
-const DEFAULT_USER_ID = 'default_user'
-
-export const getUserId = (): string => {
-  return localStorage.getItem(USER_ID_KEY) ?? DEFAULT_USER_ID
-}
-
-export const setUserIdInStorage = (userId: string): void => {
-  localStorage.setItem(USER_ID_KEY, userId)
-}
-
 // "" = relative URL → CloudFront proxy /api/* → EC2 (production & default)
 // Set VITE_API_BASE_URL=http://localhost:8000 trong .env.local khi dev local
 const baseURL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ''
@@ -20,14 +9,60 @@ export const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  withCredentials: true, // send/receive HTTP-only cookies
   // FastAPI expects repeated params for arrays: ?a=1&a=2, not ?a[]=1&a[]=2
   paramsSerializer: { indexes: null },
 })
 
-// Inject X-User-ID header on every request
-apiClient.interceptors.request.use((config) => {
-  config.headers['X-User-ID'] = getUserId()
-  return config
-})
+// ── 401 interceptor: try refresh → retry, else logout ──────────────────
+let isRefreshing = false
+let failedQueue: Array<{ resolve: (value?: undefined) => void; reject: (err: unknown) => void }> = []
+
+function processQueue(error: unknown) {
+  failedQueue.forEach(({ resolve, reject }) => {
+    if (error) reject(error)
+    else resolve(undefined)
+  })
+  failedQueue = []
+}
+
+apiClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config
+
+    // Skip auth endpoints — don't try to refresh on login/register failures
+    if (originalRequest.url?.includes('/auth/')) {
+      return Promise.reject(error)
+    }
+
+    if (error.response?.status !== 401 || originalRequest._retry) {
+      return Promise.reject(error)
+    }
+
+    if (isRefreshing) {
+      // Queue other requests while refreshing
+      return new Promise((resolve, reject) => {
+        failedQueue.push({ resolve, reject })
+      }).then(() => apiClient(originalRequest))
+    }
+
+    originalRequest._retry = true
+    isRefreshing = true
+
+    try {
+      await apiClient.post('/api/v1/auth/refresh')
+      processQueue(null)
+      return apiClient(originalRequest)
+    } catch (refreshError) {
+      processQueue(refreshError)
+      // Refresh failed — dispatch logout event
+      window.dispatchEvent(new CustomEvent('auth:logout'))
+      return Promise.reject(refreshError)
+    } finally {
+      isRefreshing = false
+    }
+  },
+)
 
 export const getApiBaseUrl = (): string => baseURL

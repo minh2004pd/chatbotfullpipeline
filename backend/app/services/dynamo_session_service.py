@@ -266,6 +266,18 @@ class DynamoDBSessionService(BaseSessionService):
         self._table.delete_item(Key={"pk": self._pk(app_name, user_id), "session_id": session_id})
         logger.info("session_deleted", session_id=session_id, user_id=user_id)
 
+    async def update_session_state(
+        self, *, app_name: str, user_id: str, session_id: str, state: dict
+    ) -> None:
+        """Cập nhật toàn bộ session state trong DynamoDB."""
+        self._table.update_item(
+            Key={"pk": self._pk(app_name, user_id), "session_id": session_id},
+            UpdateExpression="SET #state = :state",
+            ExpressionAttributeNames={"#state": "state"},
+            ExpressionAttributeValues={":state": json.dumps(state)},
+        )
+        logger.info("session_state_updated", session_id=session_id, user_id=user_id)
+
     async def append_event(self, session: Session, event: Event) -> Event:
         # Gọi super() để xử lý state delta, temp state, và append vào session.events
         event = await super().append_event(session=session, event=event)

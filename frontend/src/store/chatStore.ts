@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { ChatStore, Message, Citation, Toast } from '@/types'
-import { setUserIdInStorage } from '@/api/client'
 
 const generateId = () => crypto.randomUUID()
 
@@ -13,6 +12,8 @@ export const useChatStore = create<ChatStore>()(
       userId: localStorage.getItem('memrag_user_id') ?? 'default_user',
       isStreaming: false,
       toasts: [],
+      activeWikiNodes: [],
+      wikiAccessCount: 0,
 
       addMessage: (message: Message) => {
         set((state) => ({ messages: [...state.messages, message] }))
@@ -44,7 +45,6 @@ export const useChatStore = create<ChatStore>()(
       },
 
       setUserId: (userId: string) => {
-        setUserIdInStorage(userId)
         set({ userId })
       },
 
@@ -75,6 +75,20 @@ export const useChatStore = create<ChatStore>()(
 
       setIsStreaming: (value: boolean) => {
         set({ isStreaming: value })
+      },
+
+      addActiveWikiNode: (key: string) => {
+        set((state) => {
+          if (state.activeWikiNodes.includes(key)) return state
+          return {
+            activeWikiNodes: [...state.activeWikiNodes, key],
+            wikiAccessCount: state.wikiAccessCount + 1,
+          }
+        })
+      },
+
+      clearActiveWikiNodes: () => {
+        set({ activeWikiNodes: [], wikiAccessCount: 0 })
       },
     }),
     {

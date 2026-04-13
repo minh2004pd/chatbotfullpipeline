@@ -30,6 +30,7 @@ function toWikiNode(node: Node): WikiGraphNode {
 
 export default function WikiGraphPanel() {
   const userId = useChatStore((s) => s.userId)
+  const activeWikiNodes = useChatStore((s) => s.activeWikiNodes)
   const [showSummaries, setShowSummaries] = useState(false)
   const [showStubs, setShowStubs] = useState(false)
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([])
@@ -60,7 +61,7 @@ export default function WikiGraphPanel() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  // Rebuild graph khi data thay đổi
+  // Rebuild graph khi data hoặc activeWikiNodes thay đổi
   useEffect(() => {
     if (!data) return
 
@@ -68,7 +69,7 @@ export default function WikiGraphPanel() {
       id: n.key,   // unique key = "{category}/{slug}"
       type: 'wikiNode',
       position: { x: 0, y: 0 },
-      data: n as unknown as Record<string, unknown>,
+      data: { ...n, isActive: activeWikiNodes.includes(n.key) } as unknown as Record<string, unknown>,
       selected: selectedNode?.key === n.key,
     }))
 
@@ -82,7 +83,7 @@ export default function WikiGraphPanel() {
 
     setNodes(applyDagreLayout(rfNodes, rfEdges))
     setEdges(rfEdges)
-  }, [data]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data, activeWikiNodes]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     const wikiNode = toWikiNode(node)
