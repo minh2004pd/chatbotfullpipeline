@@ -5,12 +5,11 @@ import asyncio
 import structlog
 from google.adk.tools import ToolContext
 
+from app.agents.tools.utils import get_user_id
 from app.core.config import get_settings
 from app.core.database import get_qdrant_client
 from app.repositories.qdrant_repo import QdrantRepository
 from app.utils.gemini_utils import get_query_embedding
-
-from app.agents.tools.utils import get_user_id
 
 logger = structlog.get_logger(__name__)
 

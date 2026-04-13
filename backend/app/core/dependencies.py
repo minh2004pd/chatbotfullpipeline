@@ -17,11 +17,10 @@ Sơ đồ dependency graph:
        └── get_chat_service()
 """
 
-import uuid
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, status
 from google.adk.runners import Runner
 from mem0 import Memory
 from qdrant_client import QdrantClient

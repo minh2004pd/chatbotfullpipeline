@@ -182,8 +182,9 @@ async def get_me(request: Request, db: AsyncSession = Depends(get_db)) -> UserRe
             detail="Chưa xác thực.",
         )
 
-    from app.models.user import User
     from sqlalchemy import select
+
+    from app.models.user import User
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
