@@ -685,7 +685,11 @@ def test_split_text_splits_at_sentence():
     assert len(result) >= 2
     # Each chunk should end at sentence boundary, not mid-sentence
     for chunk in result[:-1]:
-        assert chunk.rstrip().endswith(".") or chunk.rstrip().endswith("!") or chunk.rstrip().endswith("?")
+        assert (
+            chunk.rstrip().endswith(".")
+            or chunk.rstrip().endswith("!")
+            or chunk.rstrip().endswith("?")
+        )
 
 
 def test_split_text_no_content_lost():
@@ -777,7 +781,12 @@ def test_reduce_extractions_deduplicates_across_chunks():
         _ChunkExtraction(
             chunk_index=1,
             items=[
-                {"slug": "lora", "category": "entities", "title": "LoRA Method Detail", "type": "method"},
+                {
+                    "slug": "lora",
+                    "category": "entities",
+                    "title": "LoRA Method Detail",
+                    "type": "method",
+                },
                 {"slug": "qlora", "category": "entities", "title": "QLoRA", "type": "method"},
                 {"slug": "finetuning", "category": "topics", "title": "Fine-tuning Method"},
             ],
@@ -786,7 +795,12 @@ def test_reduce_extractions_deduplicates_across_chunks():
         _ChunkExtraction(
             chunk_index=2,
             items=[
-                {"slug": "lora", "category": "entities", "title": "LoRA Experiment", "type": "method"},
+                {
+                    "slug": "lora",
+                    "category": "entities",
+                    "title": "LoRA Experiment",
+                    "type": "method",
+                },
                 {"slug": "adamw", "category": "entities", "title": "AdamW", "type": "optimizer"},
             ],
             chunk_text="medium exp " * 5,  # 55 chars
@@ -818,12 +832,18 @@ def test_reduce_extractions_respects_limits():
     extractions = [
         _ChunkExtraction(
             chunk_index=0,
-            items=[{"slug": f"entity{i}", "category": "entities", "title": f"Entity {i}"} for i in range(15)],
+            items=[
+                {"slug": f"entity{i}", "category": "entities", "title": f"Entity {i}"}
+                for i in range(15)
+            ],
             chunk_text="chunk 0",
         ),
         _ChunkExtraction(
             chunk_index=1,
-            items=[{"slug": f"topic{i}", "category": "topics", "title": f"Topic {i}"} for i in range(10)],
+            items=[
+                {"slug": f"topic{i}", "category": "topics", "title": f"Topic {i}"}
+                for i in range(10)
+            ],
             chunk_text="chunk 1",
         ),
     ]
@@ -870,7 +890,11 @@ def test_build_slug_to_chunks_caps_text_size():
     }
 
     extractions = [
-        _ChunkExtraction(chunk_index=i, items=[{"slug": "myentity", "category": "entities", "title": "MyEntity"}], chunk_text=text)
+        _ChunkExtraction(
+            chunk_index=i,
+            items=[{"slug": "myentity", "category": "entities", "title": "MyEntity"}],
+            chunk_text=text,
+        )
         for i, text in chunk_texts.items()
     ]
 
@@ -923,10 +947,16 @@ async def test_parallel_extraction_runs_concurrently(service, repo):
         call_times.append(time.monotonic())
         await asyncio.sleep(0.1)  # simulate LLM latency
         return [
-            {"slug": f"entity{len(call_times)}", "category": "entities", "title": f"Entity {len(call_times)}"},
+            {
+                "slug": f"entity{len(call_times)}",
+                "category": "entities",
+                "title": f"Entity {len(call_times)}",
+            },
         ]
 
-    synthesized = "---\ntitle: Test\nsources: [doc-1]\nlast_updated: 2026-04-09\nversion: 1\n---\n\n# Test"
+    synthesized = (
+        "---\ntitle: Test\nsources: [doc-1]\nlast_updated: 2026-04-09\nversion: 1\n---\n\n# Test"
+    )
 
     mock_extract_wrapper = AsyncMock(side_effect=mock_extract)
     mock_synthesize = AsyncMock(return_value=synthesized)
@@ -968,13 +998,21 @@ async def test_pipeline_continues_when_one_chunk_fails(service, repo):
         if call_count == 2:  # chunk thứ 2 fail
             raise RuntimeError("Chunk 2: content policy violation")
         return [
-            {"slug": f"entity{call_count}", "category": "entities", "title": f"Entity {call_count}"},
+            {
+                "slug": f"entity{call_count}",
+                "category": "entities",
+                "title": f"Entity {call_count}",
+            },
         ]
 
-    synthesized = "---\ntitle: Test\nsources: [doc-err]\nlast_updated: 2026-04-09\nversion: 1\n---\n\n# Test"
+    synthesized = (
+        "---\ntitle: Test\nsources: [doc-err]\nlast_updated: 2026-04-09\nversion: 1\n---\n\n# Test"
+    )
 
     with (
-        patch.object(service, "_extract_topics", new=AsyncMock(side_effect=mock_extract_fail_on_chunk_1)),
+        patch.object(
+            service, "_extract_topics", new=AsyncMock(side_effect=mock_extract_fail_on_chunk_1)
+        ),
         patch.object(service, "_synthesize_page", new=AsyncMock(return_value=synthesized)),
     ):
         # Pipeline KHÔNG được raise

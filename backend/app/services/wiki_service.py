@@ -339,13 +339,22 @@ class WikiService:
                 _ChunkExtraction(
                     chunk_index=0,
                     items=[
-                        {"slug": _slugify(source_name), "category": "entities", "title": source_name, "type": ""},
+                        {
+                            "slug": _slugify(source_name),
+                            "category": "entities",
+                            "title": source_name,
+                            "type": "",
+                        },
                         {
                             "slug": ("topic-" + _slugify(source_name))[:60],
                             "category": "topics",
                             "title": f"Chủ đề: {source_name}",
                         },
-                        {"slug": _slugify(source_name), "category": "summaries", "title": f"Tóm tắt: {source_name}"},
+                        {
+                            "slug": _slugify(source_name),
+                            "category": "summaries",
+                            "title": f"Tóm tắt: {source_name}",
+                        },
                     ],
                     chunk_text=raw_text[: self._settings.wiki_chunk_size],
                 )
@@ -383,7 +392,9 @@ class WikiService:
         has_summary = any(item["category"] == "summaries" for item in deduped_items)
 
         # Build danh sách pages cần synthesize
-        pages_to_synthesize: list[tuple[dict, str, str]] = []  # (item, existing_content, merged_text)
+        pages_to_synthesize: list[
+            tuple[dict, str, str]
+        ] = []  # (item, existing_content, merged_text)
         all_processed_paths: set[str] = set()
 
         for item in deduped_items:
@@ -437,7 +448,10 @@ class WikiService:
 
         # Chạy synthesis song song
         synthesis_results = await asyncio.gather(
-            *[_synthesize_one_page(item, existing, merged_text) for item, existing, merged_text in pages_to_synthesize]
+            *[
+                _synthesize_one_page(item, existing, merged_text)
+                for item, existing, merged_text in pages_to_synthesize
+            ]
         )
 
         # Ghi kết quả vào wiki + update link index + ghost stubs
@@ -1076,7 +1090,10 @@ def _build_slug_to_chunks(
             if slug in target_slugs:
                 current_total = sum(len(t) for t in slug_to_chunks[slug])
                 # Always include at least 1 chunk
-                if not slug_to_chunks[slug] or current_total + len(extraction.chunk_text) <= max_text_per_page:
+                if (
+                    not slug_to_chunks[slug]
+                    or current_total + len(extraction.chunk_text) <= max_text_per_page
+                ):
                     slug_to_chunks[slug].append(extraction.chunk_text)
 
     return slug_to_chunks
