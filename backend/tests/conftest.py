@@ -23,7 +23,9 @@ def app():
     # Mock get_db (PostgreSQL) — return a no-op async session for tests
     mock_db = AsyncMock()
     mock_db.get = AsyncMock(return_value=None)
-    mock_db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
+    mock_db.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+    )
     mock_db.flush = AsyncMock()
     mock_db.refresh = AsyncMock()
     mock_db.commit = AsyncMock()

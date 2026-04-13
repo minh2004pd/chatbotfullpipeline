@@ -218,6 +218,7 @@ async def google_auth() -> GoogleUrlResponse:
 
 # ── Endpoints ──────────────────────────────────────────────────────────
 
+
 # GET callback: supports browser redirect from Google OAuth
 @router.get("/google/callback", response_model=TokenResponse)
 async def google_callback_get(
