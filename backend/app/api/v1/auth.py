@@ -143,7 +143,23 @@ async def login(
 
 
 @router.post("/logout")
-async def logout(response: Response) -> dict:
+async def logout(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    # Invalidate refresh token in DB (rotation-based revocation)
+    user_id = _get_current_user_id_from_cookie(request)
+    if user_id:
+        from sqlalchemy import select as sa_select
+
+        from app.models.user import User
+
+        result = await db.execute(sa_select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if user:
+            user.refresh_token_jti = None
+
     _clear_token_cookies(response)
     return {"message": "Đã đăng xuất."}
 

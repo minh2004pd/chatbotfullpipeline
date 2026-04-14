@@ -43,7 +43,8 @@ async def test_get_user_memories(client: AsyncClient, mock_mem0_client):
             {"id": "mem-2", "memory": "Thích lập trình Python"},
         ]
     }
-    response = await client.get("/api/v1/memory/user/test_user")
+    # Endpoint now derives user_id from auth (X-User-ID header in test)
+    response = await client.get("/api/v1/memory")
     assert response.status_code == 200
     data = response.json()
     assert data["user_id"] == "test_user"
@@ -60,7 +61,8 @@ async def test_delete_memory(client: AsyncClient, mock_mem0_client):
 
 @pytest.mark.asyncio
 async def test_delete_all_memories(client: AsyncClient, mock_mem0_client):
-    response = await client.delete("/api/v1/memory/user/test_user/all")
+    # Endpoint now derives user_id from auth (X-User-ID header in test)
+    response = await client.delete("/api/v1/memory/all")
     assert response.status_code == 204
     mock_mem0_client.delete_all.assert_called_once_with(user_id="test_user")
 

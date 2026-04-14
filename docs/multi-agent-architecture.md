@@ -6,12 +6,15 @@ MemRAG dùng **single agent** với Google ADK, model `gemini-2.5-flash`:
 
 ```
 Root Agent  (gemini-2.5-flash)
-  ├── search_documents          — tìm trong tài liệu PDF/file (Qdrant)
-  ├── search_meeting_transcripts— tìm trong transcript cuộc họp (Qdrant)
-  ├── list_user_documents       — liệt kê file đã upload
-  ├── list_meetings             — liệt kê cuộc họp đã ghi âm
-  ├── retrieve_memories         — mem0 long-term memory (search limit=15, top-7)
-  └── store_memory              — lưu vào mem0
+  ├── search_documents              — tìm trong tài liệu PDF/file (Qdrant)
+  ├── search_meeting_transcripts    — tìm trong transcript cuộc họp (Qdrant)
+  ├── list_user_documents           — liệt kê file đã upload
+  ├── list_meetings                 — liệt kê cuộc họp đã ghi âm
+  ├── retrieve_memories             — mem0 long-term memory (search limit=15, top-7)
+  ├── store_memory                  — lưu vào mem0
+  ├── read_wiki_index               — đọc wiki index (bản đồ tri thức)
+  ├── read_wiki_page                — đọc nội dung một wiki page cụ thể
+  └── list_wiki_pages               — liệt kê pages trong một category
 ```
 
 Context được xử lý bởi `ContextFilterPlugin` chạy như `before_model_callback`.
@@ -192,6 +195,42 @@ def store_memory(content, tool_context):
     repo.add_memory(messages=[{"role": "user", "content": content}], user_id=user_id)
 ```
 
+### read_wiki_index
+
+```python
+def read_wiki_index(tool_context):
+    # Đọc index.md — bản đồ tri thức (~1-2k tokens)
+    # Trả về danh sách rel_path của tất cả wiki pages
+    # LUÔN gọi tool này ĐẦU TIÊN cho mọi câu hỏi về nội dung
+```
+
+**Dùng khi:**
+- Agent cần overview kiến thức trước khi trả lời
+- Check xem wiki đã có thông tin về topic/entity nào chưa
+- Là bước đầu tiên trong flow: `read_wiki_index` → `read_wiki_page` → fallback search
+
+### read_wiki_page
+
+```python
+def read_wiki_page(rel_path, tool_context):
+    # Đọc nội dung đầy đủ một wiki page (Markdown + YAML frontmatter + backlinks)
+    # rel_path ví dụ: "pages/entities/lora.md", "pages/topics/efficientml.md"
+    # Trả về: content, backlinks, is_stub flag
+```
+
+**Dùng khi:**
+- Sau khi có rel_path từ `read_wiki_index`
+- Agent cần chi tiết về entity/topic cụ thể
+- Nếu `is_stub=True` hoặc nội dung chưa đủ → fallback `search_documents`
+
+### list_wiki_pages
+
+```python
+def list_wiki_pages(category, tool_context):
+    # Liệt kê filenames trong category: "entities" | "topics" | "summaries"
+    # Không đọc nội dung, chỉ listing
+```
+
 ---
 
 ## Retry & Rate Limiting
@@ -223,19 +262,30 @@ attempt=3 → delay ~4.x s (capped at 10s)
 
 ```
 backend/app/agents/
-  root_agent.py          Root Agent definition + tools wiring
+  root_agent.py              Root Agent definition + tools wiring
   plugins/
     context_filter_plugin.py  Context summarization callback
   tools/
-    qdrant_search_tool.py     search_documents tool
-    meeting_search_tool.py    search_meeting_transcripts, list_meetings tools
-    mem0_tools.py             retrieve_memories, store_memory
-    files_retrieval_tool.py   list_user_documents
+    qdrant_search_tool.py       search_documents tool
+    meeting_search_tool.py      search_meeting_transcripts, list_meetings tools
+    mem0_tools.py               retrieve_memories, store_memory
+    files_retrieval_tool.py     list_user_documents
+    wiki_tools.py               read_wiki_index, read_wiki_page, list_wiki_pages
 
 backend/app/core/
-  llm_config.yaml        Model names, temperatures, system prompt
-  llm_config.py          Pydantic models cho config
+  llm_config.yaml          Model names, temperatures, system prompt
+  llm_config.py            Pydantic models cho config
 
 backend/app/utils/
-  gemini_utils.py        get_query_embedding (cached), _with_retry (backoff 429)
+  gemini_utils.py          get_query_embedding (cached), _with_retry (backoff 429)
+  wiki_utils.py            parse_frontmatter, slug_from_rel_path, extract_wiki_links
+
+backend/app/services/
+  wiki_service.py          WikiService — 4-phase pipeline (MAP → REDUCE → SYNTHESIZE → FINALIZE)
+
+backend/app/repositories/
+  wiki_repo.py             WikiRepository — local filesystem or S3 backend
+
+backend/app/api/v1/
+  wiki.py                  REST API: GET /wiki/graph, GET /wiki/pages/{category}/{slug}
 ```

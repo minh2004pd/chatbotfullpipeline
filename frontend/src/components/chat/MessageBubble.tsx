@@ -9,6 +9,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { User, Bot, ChevronDown, ChevronUp, FileText, Copy, Check } from 'lucide-react'
 import type { Message, Citation } from '@/types'
+import { fixMalformedTables } from '@/utils/fixMalformedTables'
 
 interface Props {
   message: Message
@@ -91,6 +92,9 @@ function AssistantContent({
   content: string
   isStreaming?: boolean
 }) {
+  // Preprocess content to fix malformed tables before rendering
+  const processedContent = fixMalformedTables(content)
+
   return (
     <div className="prose prose-invert prose-sm max-w-none">
       <ReactMarkdown
@@ -161,21 +165,30 @@ function AssistantContent({
           },
           table({ children }) {
             return (
-              <div className="overflow-x-auto my-2">
+              <div className="overflow-x-auto my-3 rounded-lg border border-[#2e2e2e]">
                 <table className="text-xs border-collapse w-full">{children}</table>
               </div>
             )
           },
+          thead({ children }) {
+            return <thead className="bg-[#111]">{children}</thead>
+          },
+          tbody({ children }) {
+            return <tbody>{children}</tbody>
+          },
+          tr({ children }) {
+            return <tr className="border-t border-[#2e2e2e] hover:bg-[#1e1e1e] transition-colors">{children}</tr>
+          },
           th({ children }) {
             return (
-              <th className="border border-[#2e2e2e] bg-[#111] px-3 py-1.5 text-left font-medium text-[#a0a0a0]">
+              <th className="border-r border-[#2e2e2e] last:border-r-0 bg-[#111] px-3 py-2 text-left font-semibold text-[#a0a0a0] whitespace-nowrap">
                 {children}
               </th>
             )
           },
           td({ children }) {
             return (
-              <td className="border border-[#2e2e2e] px-3 py-1.5 text-[#e0e0e0]">
+              <td className="border-r border-[#2e2e2e] last:border-r-0 px-3 py-2 text-[#e0e0e0]">
                 {children}
               </td>
             )
@@ -185,7 +198,7 @@ function AssistantContent({
           },
         }}
       >
-        {content}
+        {processedContent}
       </ReactMarkdown>
       {isStreaming && (
         <span

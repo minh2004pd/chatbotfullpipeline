@@ -23,6 +23,9 @@ class User(Base):
     avatar_url: Mapped[str] = mapped_column(String(1024), default="")
     oauth_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
     oauth_provider_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    refresh_token_jti: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )  # Current valid refresh token ID (rotation)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

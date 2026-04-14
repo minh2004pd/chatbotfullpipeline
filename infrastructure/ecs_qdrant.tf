@@ -1,3 +1,10 @@
+# ── ECS Account Setting: awsvpc trunking ──────────────────────────────────────
+# Cần cho awsvpc network mode khi chạy nhiều task trên cùng EC2 instance
+resource "aws_ecs_account_setting_default" "awsvpc_trunking" {
+  name  = "awsvpcTrunking"
+  value = "enabled"
+}
+
 # ── Qdrant ECS Task Definition ────────────────────────────────────────────────
 resource "aws_ecs_task_definition" "qdrant" {
   family             = "${var.project_name}-qdrant"

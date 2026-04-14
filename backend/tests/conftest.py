@@ -5,11 +5,13 @@ Dùng app.dependency_overrides thay vì unittest.mock.patch —
 sạch hơn, không cần biết module path của import.
 """
 
+import os
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.core.config import get_settings
 from app.core.database import get_mem0_client, get_qdrant_client
 from app.core.database_auth import get_db
 from app.core.dependencies import get_dynamo_session_service, get_runner
@@ -18,16 +20,68 @@ from app.main import create_app
 
 @pytest.fixture
 def app():
+    # Force debug mode for tests — skips JWT validation and CSRF
+    os.environ["DEBUG"] = "true"
+    os.environ["JWT_SECRET_KEY"] = "test-secret-key-for-testing-only-32chars"
+
+    # Clear cached settings so it re-reads from env
+    get_settings.cache_clear()
+
     instance = create_app()
 
     # Mock get_db (PostgreSQL) — return a no-op async session for tests
     mock_db = AsyncMock()
-    mock_db.get = AsyncMock(return_value=None)
-    mock_db.execute = AsyncMock(
-        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None))
-    )
+
+    def _make_fake_user(user_id: str = "test_user"):
+        """Create a fake User object for auth queries."""
+        from app.models.user import User
+
+        fake = MagicMock(spec=User)
+        fake.id = user_id
+        fake.is_active = True
+        fake.email = f"{user_id}@test.com"
+        fake.display_name = user_id
+        fake.avatar_url = ""
+        fake.oauth_provider = None
+        fake.oauth_provider_id = None
+        fake.refresh_token_jti = None
+        return fake
+
+    def mock_db_get(user_model_cls, user_id):
+        """Return a fake User so auth passes in debug mode."""
+        from app.models.user import User
+
+        if user_model_cls is User:
+            return _make_fake_user(user_id)
+        return None
+
+    def _make_execute_result(user=None):
+        """Factory for execute() result mock."""
+        result = MagicMock()
+        result.scalar_one_or_none = MagicMock(return_value=user)
+        result.scalar_one = MagicMock(return_value=user)
+        return result
+
+    def mock_execute(*args, **kwargs):
+        """Return empty result for execute calls (auth uses db.get now)."""
+        return _make_execute_result(user=None)
+
+    async def mock_refresh(obj):
+        """Simulate SQLAlchemy refresh — assign defaults on new objects."""
+        import uuid
+
+        if hasattr(obj, "id") and obj.id is None:
+            obj.id = str(uuid.uuid4())
+        # Apply column defaults that would normally be set on flush
+        if hasattr(obj, "avatar_url") and obj.avatar_url is None:
+            obj.avatar_url = ""
+        if hasattr(obj, "display_name") and obj.display_name is None:
+            obj.display_name = ""
+
+    mock_db.get = AsyncMock(side_effect=mock_db_get)
+    mock_db.execute = AsyncMock(side_effect=mock_execute)
     mock_db.flush = AsyncMock()
-    mock_db.refresh = AsyncMock()
+    mock_db.refresh = AsyncMock(side_effect=mock_refresh)
     mock_db.commit = AsyncMock()
     mock_db.rollback = AsyncMock()
 
@@ -46,7 +100,10 @@ async def client(app):
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",
-        headers={"X-User-ID": "test_user"},
+        headers={
+            "X-User-ID": "test_user",
+            "X-Requested-With": "XMLHttpRequest",  # CSRF protection
+        },
     ) as ac:
         yield ac
 

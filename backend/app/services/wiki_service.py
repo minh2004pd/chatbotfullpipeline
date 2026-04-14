@@ -132,7 +132,7 @@ class WikiService:
         except Exception as e:
             logger.error("wiki_update_transcript_failed", meeting_id=meeting_id, error=str(e))
 
-    def normalize_page_filenames(self, *, user_id: str) -> dict[str, int]:
+    async def normalize_page_filenames(self, *, user_id: str) -> dict[str, int]:
         """Migration: rename/merge các page files có slug không chuẩn về [a-z0-9].
 
         - "Adam.md" → "adam.md"  (uppercase)
@@ -142,7 +142,7 @@ class WikiService:
         Trả về: {"renamed": N, "merged": N, "skipped": N}
         """
         stats = {"renamed": 0, "merged": 0, "skipped": 0}
-        all_pages = self._repo.list_all_pages(user_id=user_id)
+        all_pages = await self._repo.alist_all_pages(user_id=user_id)
 
         for page_info in all_pages:
             filename = page_info["filename"]
@@ -157,8 +157,8 @@ class WikiService:
                 continue  # đã chuẩn rồi
 
             new_rel = f"pages/{category}/{new_slug}.md"
-            old_content = self._repo.read_page(user_id=user_id, rel_path=old_rel) or ""
-            existing_new = self._repo.read_page(user_id=user_id, rel_path=new_rel)
+            old_content = await self._repo.aread_page(user_id=user_id, rel_path=old_rel) or ""
+            existing_new = await self._repo.aread_page(user_id=user_id, rel_path=new_rel)
 
             if existing_new:
                 # Merge sources: thêm sources của file cũ vào file mới
@@ -174,20 +174,20 @@ class WikiService:
                         existing_new,
                         flags=re.MULTILINE,
                     )
-                    self._repo.write_page(user_id=user_id, rel_path=new_rel, content=updated)
-                self._repo.delete_page(user_id=user_id, rel_path=old_rel)
+                    await self._repo.awrite_page(user_id=user_id, rel_path=new_rel, content=updated)
+                await self._repo.adelete_page(user_id=user_id, rel_path=old_rel)
                 logger.info("wiki_page_merged", user_id=user_id, old=old_rel, new=new_rel)
                 stats["merged"] += 1
             else:
                 # Rename: ghi vào path mới, xóa path cũ
-                self._repo.write_page(user_id=user_id, rel_path=new_rel, content=old_content)
-                self._repo.delete_page(user_id=user_id, rel_path=old_rel)
+                await self._repo.awrite_page(user_id=user_id, rel_path=new_rel, content=old_content)
+                await self._repo.adelete_page(user_id=user_id, rel_path=old_rel)
                 logger.info("wiki_page_renamed", user_id=user_id, old=old_rel, new=new_rel)
                 stats["renamed"] += 1
 
         if stats["renamed"] or stats["merged"]:
-            self._rebuild_index(user_id=user_id)
-            self._rebuild_link_index(user_id=user_id)
+            await self._rebuild_index(user_id=user_id)
+            await self._rebuild_link_index(user_id=user_id)
 
         return stats
 
@@ -208,12 +208,12 @@ class WikiService:
             return
         try:
             # 1. Xóa pages liên quan
-            all_pages = self._repo.list_all_pages(user_id=user_id)
+            all_pages = await self._repo.alist_all_pages(user_id=user_id)
             pages_deleted = 0
             pages_updated = 0
             for page_info in all_pages:
                 rel_path = page_info["rel_path"]
-                content = self._repo.read_page(user_id=user_id, rel_path=rel_path)
+                content = await self._repo.aread_page(user_id=user_id, rel_path=rel_path)
                 if not content or source_id not in content:
                     continue
 
@@ -226,7 +226,7 @@ class WikiService:
 
                 if len(sources) <= 1:
                     # Chỉ có source này → xóa page
-                    self._repo.delete_page(user_id=user_id, rel_path=rel_path)
+                    await self._repo.adelete_page(user_id=user_id, rel_path=rel_path)
                     # Xóa khỏi link index
                     await self._update_link_index(user_id=user_id, rel_path=rel_path, new_links=[])
                     logger.info("wiki_page_deleted_orphan", user_id=user_id, path=rel_path)
@@ -241,7 +241,7 @@ class WikiService:
                     )
                     if new_content:
                         async with _get_page_lock(user_id, rel_path):
-                            self._repo.write_page(
+                            await self._repo.awrite_page(
                                 user_id=user_id, rel_path=rel_path, content=new_content
                             )
                             # Cập nhật link index sau khi re-synthesize
@@ -253,12 +253,12 @@ class WikiService:
                         pages_updated += 1
 
             # 2. Xóa raw file (documents hoặc transcripts)
-            self._repo.delete_raw(user_id=user_id, source_id=source_id)
+            await self._repo.adelete_raw(user_id=user_id, source_id=source_id)
 
             # 3. Luôn rebuild index + link index và ghi log
-            self._rebuild_index(user_id=user_id)
-            self._rebuild_link_index(user_id=user_id)
-            self._repo.append_log(
+            await self._rebuild_index(user_id=user_id)
+            await self._rebuild_link_index(user_id=user_id)
+            await self._repo.aappend_log(
                 user_id=user_id,
                 entry=(
                     f"## [{_now_iso()}] DELETE | source={source_id} | "
@@ -287,10 +287,10 @@ class WikiService:
         raw_category: str,
         raw_filename: str,
     ) -> None:
-        self._repo.ensure_wiki_structure(user_id=user_id)
+        await self._repo.aensure_wiki_structure(user_id=user_id)
 
         # 1. Lưu raw text
-        self._repo.write_raw(
+        await self._repo.awrite_raw(
             user_id=user_id,
             category=raw_category,
             filename=raw_filename,
@@ -404,7 +404,7 @@ class WikiService:
                 continue
 
             rel_path = f"pages/{category}/{slug}.md"
-            existing = self._repo.read_page(user_id=user_id, rel_path=rel_path) or ""
+            existing = await self._repo.aread_page(user_id=user_id, rel_path=rel_path) or ""
 
             # Merge tất cả chunks liên quan thành 1 text cho page này
             chunk_texts = slug_to_chunks.get(slug, [""])
@@ -461,7 +461,9 @@ class WikiService:
         for rel_path, new_content in synthesis_results:
             if new_content:
                 async with _get_page_lock(user_id, rel_path):
-                    self._repo.write_page(user_id=user_id, rel_path=rel_path, content=new_content)
+                    await self._repo.awrite_page(
+                        user_id=user_id, rel_path=rel_path, content=new_content
+                    )
                     all_processed_paths.add(rel_path)
                     logger.info("wiki_page_updated", user_id=user_id, path=rel_path)
 
@@ -471,7 +473,7 @@ class WikiService:
                     self._update_link_index(user_id=user_id, rel_path=rel_path, new_links=links)
                 )
                 ghost_stub_tasks.append(
-                    self._create_ghost_stubs(
+                    await self._create_ghost_stubs(
                         user_id=user_id,
                         content=new_content,
                         source_id=source_id,
@@ -496,11 +498,11 @@ class WikiService:
         )
 
         # Rebuild index + link index (1 lần cuối)
-        self._rebuild_index(user_id=user_id)
-        self._rebuild_link_index(user_id=user_id)
+        await self._rebuild_index(user_id=user_id)
+        await self._rebuild_link_index(user_id=user_id)
 
         # Log
-        self._repo.append_log(
+        await self._repo.aappend_log(
             user_id=user_id,
             entry=(
                 f"## [{_now_iso()}] INGEST | {raw_category} | {source_name} | "
@@ -559,23 +561,58 @@ class WikiService:
                     # Entities — giữ lại "type" để dùng đúng template synthesis
                     for e in parsed.get("entities", []):
                         if isinstance(e, dict) and e.get("slug"):
+                            # Handle case where LLM returns a list instead of string
+                            raw_slug = e["slug"]
+                            if isinstance(raw_slug, list):
+                                raw_slug = raw_slug[0] if raw_slug else ""
+                            if raw_slug is None or not isinstance(raw_slug, str):
+                                raw_slug = str(raw_slug) if raw_slug is not None else ""
+
+                            # Handle type field similarly
+                            raw_type = e.get("type", "")
+                            if isinstance(raw_type, list):
+                                raw_type = ", ".join(str(t) for t in raw_type) if raw_type else ""
+                            elif raw_type is None or not isinstance(raw_type, str):
+                                raw_type = str(raw_type) if raw_type is not None else ""
+
+                            # Handle title field
+                            raw_title = e.get("title", raw_slug)
+                            if isinstance(raw_title, list):
+                                raw_title = raw_title[0] if raw_title else raw_slug
+                            elif raw_title is None or not isinstance(raw_title, str):
+                                raw_title = str(raw_title) if raw_title is not None else raw_slug
+
                             entities.append(
                                 {
-                                    "slug": _slugify(e["slug"]),
+                                    "slug": _slugify(raw_slug),
                                     "category": "entities",
-                                    "title": e.get("title", e["slug"]),
-                                    "type": e.get("type", ""),  # model|framework|dataset|...
+                                    "title": raw_title,
+                                    "type": raw_type,
                                 }
                             )
 
                     # Topics
                     for t in parsed.get("topics", []):
                         if isinstance(t, dict) and t.get("slug"):
+                            # Handle case where LLM returns a list instead of string
+                            raw_slug = t["slug"]
+                            if isinstance(raw_slug, list):
+                                raw_slug = raw_slug[0] if raw_slug else ""
+                            if raw_slug is None or not isinstance(raw_slug, str):
+                                raw_slug = str(raw_slug) if raw_slug is not None else ""
+
+                            # Handle title field
+                            raw_title = t.get("title", raw_slug)
+                            if isinstance(raw_title, list):
+                                raw_title = raw_title[0] if raw_title else raw_slug
+                            elif raw_title is None or not isinstance(raw_title, str):
+                                raw_title = str(raw_title) if raw_title is not None else raw_slug
+
                             topics.append(
                                 {
-                                    "slug": _slugify(t["slug"]),
+                                    "slug": _slugify(raw_slug),
                                     "category": "topics",
-                                    "title": t.get("title", t["slug"]),
+                                    "title": raw_title,
                                 }
                             )
 
@@ -605,10 +642,28 @@ class WikiService:
                     # Summary — luôn có đúng 1
                     s = parsed.get("summary")
                     if isinstance(s, dict) and s.get("slug"):
+                        # Handle case where LLM returns a list instead of string
+                        raw_slug = s["slug"]
+                        if isinstance(raw_slug, list):
+                            raw_slug = raw_slug[0] if raw_slug else ""
+                        if raw_slug is None or not isinstance(raw_slug, str):
+                            raw_slug = str(raw_slug) if raw_slug is not None else ""
+
+                        # Handle title field
+                        raw_title = s.get("title", f"Tóm tắt: {source_name}")
+                        if isinstance(raw_title, list):
+                            raw_title = raw_title[0] if raw_title else f"Tóm tắt: {source_name}"
+                        elif raw_title is None or not isinstance(raw_title, str):
+                            raw_title = (
+                                str(raw_title)
+                                if raw_title is not None
+                                else f"Tóm tắt: {source_name}"
+                            )
+
                         summary = {
-                            "slug": _slugify(s["slug"]),
+                            "slug": _slugify(raw_slug),
                             "category": "summaries",
-                            "title": s.get("title", f"Tóm tắt: {source_name}"),
+                            "title": raw_title,
                         }
                     else:
                         summary = {
@@ -661,7 +716,7 @@ class WikiService:
         clean_existing = _strip_code_fence(existing_content.strip()) if existing_content else ""
 
         # Dynamic schema injection: đọc wiki_schema.md của user (Single Source of Truth)
-        schema = self._repo.read_schema(user_id=user_id)
+        schema = await self._repo.aread_schema(user_id=user_id)
 
         prompt = prompt_template.format(
             topic_title=topic_title,
@@ -721,9 +776,9 @@ class WikiService:
 
     # ── Index rebuild (rule-based) ────────────────────────────────────────────
 
-    def _rebuild_index(self, *, user_id: str) -> None:
+    async def _rebuild_index(self, *, user_id: str) -> None:
         """Rebuild index.md từ tất cả pages hiện có (parse frontmatter, không cần LLM)."""
-        all_pages = self._repo.list_all_pages(user_id=user_id)
+        all_pages = await self._repo.alist_all_pages(user_id=user_id)
         if not all_pages:
             return
 
@@ -733,7 +788,7 @@ class WikiService:
             rel_path = page_info["rel_path"]
             category = page_info["category"]
             filename = page_info["filename"]
-            content = self._repo.read_page(user_id=user_id, rel_path=rel_path) or ""
+            content = await self._repo.aread_page(user_id=user_id, rel_path=rel_path) or ""
             if _is_stub(content):
                 continue
             title = (
@@ -761,7 +816,7 @@ class WikiService:
             lines.extend(sections["summaries"])
             lines.append("")
 
-        self._repo.write_index(user_id=user_id, content="\n".join(lines))
+        await self._repo.awrite_index(user_id=user_id, content="\n".join(lines))
 
     # ── Link index management ─────────────────────────────────────────────────
 
@@ -770,7 +825,7 @@ class WikiService:
     ) -> None:
         """Cập nhật forward links cho 1 page. Thread-safe qua user-level lock."""
         async with _get_link_index_lock(user_id):
-            index = self._repo.read_link_index(user_id=user_id)
+            index = await self._repo.aread_link_index(user_id=user_id)
             if new_links:
                 filtered = [lp for lp in dict.fromkeys(new_links) if lp != rel_path]
                 if filtered:
@@ -779,9 +834,9 @@ class WikiService:
                     index.pop(rel_path, None)
             else:
                 index.pop(rel_path, None)
-            self._repo.write_link_index(user_id=user_id, data=index)
+            await self._repo.awrite_link_index(user_id=user_id, data=index)
 
-    def _rebuild_link_index(self, *, user_id: str) -> None:
+    async def _rebuild_link_index(self, *, user_id: str) -> None:
         """Rebuild toàn bộ link index từ scratch bằng cách scan tất cả pages.
 
         Values trong index là rel_paths (không phải slugs).
@@ -789,14 +844,14 @@ class WikiService:
         Topic/summary pages được link tường minh đến tất cả entity pages
         có chung source_id trong frontmatter.
         """
-        all_pages = self._repo.list_all_pages(user_id=user_id)
+        all_pages = await self._repo.alist_all_pages(user_id=user_id)
 
         # Pass 1: thu thập content + links cơ bản (rel_path → list[rel_path])
         page_contents: dict[str, str] = {}
         index: dict[str, list[str]] = {}
         for page_info in all_pages:
             rel_path = page_info["rel_path"]
-            content = self._repo.read_page(user_id=user_id, rel_path=rel_path)
+            content = await self._repo.aread_page(user_id=user_id, rel_path=rel_path)
             if not content or _is_stub(content):
                 continue
             page_contents[rel_path] = content
@@ -826,7 +881,7 @@ class WikiService:
                 merged = list(dict.fromkeys(index.get(rel_path, []) + sorted(extra - existing)))
                 index[rel_path] = merged
 
-        self._repo.write_link_index(user_id=user_id, data=index)
+        await self._repo.awrite_link_index(user_id=user_id, data=index)
 
     # ── Ghost Link stubs ──────────────────────────────────────────────────────
 
@@ -843,7 +898,7 @@ class WikiService:
             return []
 
         existing_paths = {
-            page_info["rel_path"] for page_info in self._repo.list_all_pages(user_id=user_id)
+            page_info["rel_path"] for page_info in await self._repo.alist_all_pages(user_id=user_id)
         }
 
         stubs_created = []
@@ -853,8 +908,8 @@ class WikiService:
             slug = _slugify(Path(link_rel_path).stem)
             stub_content = _stub_page(slug, source_id, source_name)
             async with _get_page_lock(user_id, link_rel_path):
-                if not self._repo.read_page(user_id=user_id, rel_path=link_rel_path):
-                    self._repo.write_page(
+                if not await self._repo.aread_page(user_id=user_id, rel_path=link_rel_path):
+                    await self._repo.awrite_page(
                         user_id=user_id, rel_path=link_rel_path, content=stub_content
                     )
                     stubs_created.append(link_rel_path)
@@ -864,7 +919,7 @@ class WikiService:
 
     # ── Smart re-ingestion ────────────────────────────────────────────────────
 
-    def _score_related_page(
+    async def _score_related_page(
         self, rel_path: str, link_index: dict[str, list[str]], user_id: str
     ) -> tuple[int, str]:
         """Score page để ưu tiên sort:
@@ -873,7 +928,7 @@ class WikiService:
         Trả về tuple để sort ascending: (-backlink_count, last_updated).
         """
         backlink_count = sum(1 for links in link_index.values() if rel_path in links)
-        content = self._repo.read_page(user_id=user_id, rel_path=rel_path) or ""
+        content = await self._repo.aread_page(user_id=user_id, rel_path=rel_path) or ""
         last_updated = _parse_frontmatter_date(content) or "2000-01-01"
         return (-backlink_count, last_updated)
 
@@ -891,7 +946,7 @@ class WikiService:
         Dùng link_index.json để tra cứu hiệu quả. Sort theo hub score trước khi
         giới hạn số lượng.
         """
-        link_index = self._repo.read_link_index(user_id=user_id)
+        link_index = await self._repo.aread_link_index(user_id=user_id)
         if not link_index:
             return 0
 
@@ -907,12 +962,14 @@ class WikiService:
             return 0
 
         # Sort: hub pages (nhiều backlinks) trước, pages cũ trước
-        related.sort(key=lambda p: self._score_related_page(p, link_index, user_id))
+        # Compute scores first (async), then sort
+        scores = {p: await self._score_related_page(p, link_index, user_id) for p in related}
+        related.sort(key=lambda p: scores[p])
         related = related[: self._settings.wiki_max_related_pages_per_source]
 
         updated = 0
         for rel_path in related:
-            existing = self._repo.read_page(user_id=user_id, rel_path=rel_path) or ""
+            existing = await self._repo.aread_page(user_id=user_id, rel_path=rel_path) or ""
             topic_title = _parse_frontmatter_title(existing) or rel_path
             category = rel_path.split("/")[1]  # entities|topics|summaries
 
@@ -927,7 +984,9 @@ class WikiService:
                     source_id=source_id,
                 )
                 if new_content:
-                    self._repo.write_page(user_id=user_id, rel_path=rel_path, content=new_content)
+                    await self._repo.awrite_page(
+                        user_id=user_id, rel_path=rel_path, content=new_content
+                    )
                     await self._update_link_index(
                         user_id=user_id,
                         rel_path=rel_path,

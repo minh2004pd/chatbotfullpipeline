@@ -6,13 +6,13 @@ export const MEMORY_QUERY_KEY = ['memory']
 
 export function useMemory() {
   const queryClient = useQueryClient()
-  const { addToast, userId } = useChatStore()
+  const { addToast } = useChatStore()
 
   const memoriesQuery = useQuery({
-    queryKey: [...MEMORY_QUERY_KEY, userId],
-    queryFn: () => memoryApi.list(userId),
+    queryKey: MEMORY_QUERY_KEY,
+    queryFn: () => memoryApi.list(),
     staleTime: 30_000,
-    enabled: !!userId,
+    enabled: true,
   })
 
   const deleteMutation = useMutation({
@@ -27,7 +27,7 @@ export function useMemory() {
   })
 
   const deleteAllMutation = useMutation({
-    mutationFn: () => memoryApi.deleteAll(userId),
+    mutationFn: () => memoryApi.deleteAll(),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: MEMORY_QUERY_KEY })
       addToast({ type: 'success', message: 'All memories cleared.' })

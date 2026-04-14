@@ -32,6 +32,7 @@ export async function streamChat({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest', // CSRF protection
       },
       body: JSON.stringify(request),
       credentials: 'include', // send HTTP-only cookies

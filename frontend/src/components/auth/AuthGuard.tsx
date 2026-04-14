@@ -7,13 +7,23 @@ interface AuthGuardProps {
   children: React.ReactNode
 }
 
+const OAUTH_CODE_KEY = 'memrag_oauth_code'
+
 export default function AuthGuard({ children }: AuthGuardProps) {
   const { isAuthenticated, isLoading, checkAuth, setUser } = useAuthStore()
   const [checked, setChecked] = useState(false)
 
+  // Always re-validate auth on mount — tokens may have expired
   useEffect(() => {
-    checkAuth().then(() => setChecked(true))
-  }, [checkAuth])
+    checkAuth()
+      .then((authed) => {
+        if (!authed) {
+          // Explicitly clear stale user state
+          setUser(null)
+        }
+      })
+      .finally(() => setChecked(true))
+  }, [checkAuth, setUser]) // run once on mount
 
   // Listen for logout events from 401 interceptor
   useEffect(() => {
@@ -28,27 +38,32 @@ export default function AuthGuard({ children }: AuthGuardProps) {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const code = params.get('code')
-    if (code && !checked) {
-      // Import async to avoid circular deps
-      import('@/api/auth').then(async ({ authApi }) => {
-        try {
-          const res = await authApi.googleCallback(code)
-          useAuthStore.getState().setUser({
-            id: res.user_id,
-            email: res.email,
-            display_name: res.display_name,
-            avatar_url: res.avatar_url,
-          })
-          // Clean URL
-          window.history.replaceState({}, '', window.location.pathname)
-        } catch {
-          // Stay on login page, error will show
-        }
-        setChecked(true)
-      })
-      return
-    }
-  }, [checked])
+    if (!code) return
+
+    // sessionStorage survives React StrictMode unmount/remount
+    const processedCode = sessionStorage.getItem(OAUTH_CODE_KEY)
+    if (processedCode === code) return
+
+    // Consume code immediately — prevents double-use
+    sessionStorage.setItem(OAUTH_CODE_KEY, code)
+    window.history.replaceState({}, '', window.location.pathname)
+
+    import('@/api/auth').then(async ({ authApi }) => {
+      try {
+        const res = await authApi.googleCallback(code)
+        useAuthStore.getState().setUser({
+          id: res.user_id,
+          email: res.email,
+          display_name: res.display_name,
+          avatar_url: res.avatar_url,
+        })
+      } catch {
+        // Clear processed marker so user can retry with a new code
+        sessionStorage.removeItem(OAUTH_CODE_KEY)
+      }
+      setChecked(true)
+    })
+  }, [])
 
   if (isLoading || !checked) {
     return (

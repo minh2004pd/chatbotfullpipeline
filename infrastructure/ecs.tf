@@ -12,50 +12,14 @@ resource "aws_ecs_cluster" "main" {
 # ── Task Definition ──────────────────────────────────────────────────────────
 resource "aws_ecs_task_definition" "backend" {
   family             = var.ecs_task_family
-  network_mode       = "host" # cả 2 container dùng chung network EC2 host
+  network_mode       = "host" # dùng chung network EC2 host
   execution_role_arn = aws_iam_role.ecs_task_execution_role.arn
   task_role_arn      = aws_iam_role.ecs_task_role.arn # runtime role cho DynamoDB access
 
   cpu    = var.task_cpu
   memory = var.task_memory
 
-  # Bind mount /qdrant/storage trên EBS gp3 vào container Qdrant
-  # Dữ liệu vector không mất khi container restart
-  volume {
-    name      = "qdrant-storage"
-    host_path = "/qdrant/storage"
-  }
-
   container_definitions = jsonencode([
-    # ── Sidecar: Qdrant vector DB ─────────────────────────────────────────
-    {
-      name  = "qdrant"
-      image = "qdrant/qdrant:latest"
-
-      # Soft limit — có thể dùng thêm RAM nếu host còn trống
-      memoryReservation = 512
-      cpu               = 256
-
-      # essential = true: nếu Qdrant crash → cả task restart
-      # Đảm bảo backend và Qdrant luôn chạy cùng nhau
-      essential = true
-
-      mountPoints = [{
-        sourceVolume  = "qdrant-storage"
-        containerPath = "/qdrant/storage"
-      }]
-
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group"         = "/ecs/${var.project_name}"
-          "awslogs-region"        = var.aws_region
-          "awslogs-stream-prefix" = "qdrant"
-          "awslogs-create-group"  = "true"
-        }
-      }
-    },
-
     # ── Main: FastAPI backend ─────────────────────────────────────────────
     {
       name  = var.container_name
@@ -65,12 +29,6 @@ resource "aws_ecs_task_definition" "backend" {
       cpu               = 256
 
       essential = true
-
-      # Backend chỉ start sau khi Qdrant healthy
-      dependsOn = [{
-        containerName = "qdrant"
-        condition     = "START"
-      }]
 
       portMappings = [{
         containerPort = var.container_port
@@ -98,6 +56,9 @@ resource "aws_ecs_task_definition" "backend" {
         { name = "SONIOX_MODEL", value = var.soniox_model },
         { name = "SONIOX_TARGET_LANG", value = var.soniox_target_lang },
         { name = "SONIOX_WS_URL", value = var.soniox_ws_url },
+        # RDS PostgreSQL
+        { name = "DATABASE_HOST", value = aws_db_instance.postgres.address },
+        { name = "DB_USERNAME", value = var.db_username },
       ]
 
       secrets = [
@@ -105,6 +66,9 @@ resource "aws_ecs_task_definition" "backend" {
         { name = "S3_ACCESS_KEY_ID", valueFrom = aws_ssm_parameter.s3_access_key_id.arn },
         { name = "S3_SECRET_ACCESS_KEY", valueFrom = aws_ssm_parameter.s3_secret_access_key.arn },
         { name = "SONIOX_API_KEY", valueFrom = aws_ssm_parameter.soniox_api_key.arn },
+        { name = "JWT_SECRET_KEY", valueFrom = aws_ssm_parameter.jwt_secret_key.arn },
+        # RDS PostgreSQL password from SSM
+        { name = "DB_PASSWORD", valueFrom = aws_ssm_parameter.db_password.arn },
       ]
 
       logConfiguration = {
@@ -145,9 +109,16 @@ resource "aws_ecs_service" "backend" {
   # false = terraform apply không restart container nếu task def không đổi
   force_new_deployment = false
 
+  # Register EC2 instance vào ALB target group (host network mode)
+  load_balancer {
+    target_group_arn = aws_lb_target_group.backend.arn
+    container_name   = var.container_name
+    container_port   = var.container_port
+  }
+
   tags = { Project = var.project_name }
 
-  depends_on = [aws_instance.ecs_host]
+  depends_on = [aws_instance.ecs_host_new]
 }
 
 # ── SSM Parameters (SecureString) cho sensitive values ───────────────────────
@@ -180,6 +151,14 @@ resource "aws_ssm_parameter" "soniox_api_key" {
   tags  = { Project = var.project_name }
 }
 
+# JWT secret key (SecureString) — required for production auth
+resource "aws_ssm_parameter" "jwt_secret_key" {
+  name  = "/${var.project_name}/JWT_SECRET_KEY"
+  type  = "SecureString"
+  value = var.jwt_secret_key
+  tags  = { Project = var.project_name }
+}
+
 # ── IAM: cho phép task execution role đọc SSM ────────────────────────────────
 resource "aws_iam_role_policy" "ecs_task_ssm" {
   name = "${var.project_name}-ecs-task-ssm"
@@ -195,6 +174,8 @@ resource "aws_iam_role_policy" "ecs_task_ssm" {
         aws_ssm_parameter.s3_access_key_id.arn,
         aws_ssm_parameter.s3_secret_access_key.arn,
         aws_ssm_parameter.soniox_api_key.arn,
+        aws_ssm_parameter.jwt_secret_key.arn,
+        aws_ssm_parameter.db_password.arn,
       ]
     }]
   })

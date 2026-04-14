@@ -43,3 +43,19 @@ output "cloudfront_url" {
   description = "URL public của frontend"
   value       = "https://${aws_cloudfront_distribution.frontend.domain_name}"
 }
+
+# ── RDS PostgreSQL ───────────────────────────────────────────────────────────
+output "rds_endpoint" {
+  description = "RDS PostgreSQL endpoint hostname"
+  value       = aws_db_instance.postgres.address
+}
+
+output "rds_port" {
+  description = "RDS PostgreSQL port"
+  value       = aws_db_instance.postgres.port
+}
+
+output "rds_db_name" {
+  description = "RDS PostgreSQL database name"
+  value       = aws_db_instance.postgres.db_name
+}

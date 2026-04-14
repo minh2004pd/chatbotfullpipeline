@@ -155,6 +155,13 @@ prompts:
     5. Đối chiếu trước khi viết: Mỗi claim có số liệu → kiểm tra lại trong nguồn có đúng không.
     6. **MERGE, KHÔNG REPLACE**: Giữ TOÀN BỘ nội dung hiện tại trong wiki. `new_text` chứa TẤT CẢ đoạn văn từ paper có đề cập đến topic này — viết thành trang tổng hợp đầy đủ, không bỏ sót section nào. KHÔNG xóa, KHÔNG viết lại sections đã có nếu không có mâu thuẫn trực tiếp.
     7. **One-pass synthesis**: Trang này chỉ được synthesize 1 lần duy nhất với toàn bộ nội dung liên quan. Viết đầy đủ, chi tiết ngay từ đầu — đừng viết tóm tắt hay placeholder.
+    8. **Bảng Markdown đúng chuẩn GFM**: KHI DÙNG BẢNG, BẮT BUỘC phải có dòng separator sau header row:
+       ```
+       | Header 1 | Header 2 | Header 3 |
+       |----------|----------|----------|
+       | Cell 1   | Cell 2   | Cell 3   |
+       ```
+       KHÔNG BAO GIỜ viết bảng thiếu dòng separator (dòng có `|---|---|`). Không có separator row thì bảng sẽ không hiển thị được.
 
     Bắt đầu bằng YAML frontmatter:
     ---

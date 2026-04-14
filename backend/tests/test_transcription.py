@@ -8,8 +8,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
@@ -65,7 +63,8 @@ def _mock_meeting_repo():
 
 
 @pytest.fixture
-def client():
+def client(app):
+    """Synchronous TestClient — reuses conftest app (get_db already mocked)."""
     return TestClient(app, raise_server_exceptions=True)
 
 

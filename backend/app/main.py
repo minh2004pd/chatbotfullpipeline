@@ -10,6 +10,7 @@ from app.api.v1 import auth, chat, documents, memory, sessions, wiki
 from app.api.v1.transcription import meetings_router
 from app.api.v1.transcription import router as transcription_router
 from app.core.config import get_settings
+from app.core.csrf import CSRFMiddleware
 from app.core.database import ensure_collections, ensure_dynamo_table, ensure_meetings_table
 from app.core.database_auth import init_db
 from app.core.logger import setup_logging
@@ -70,6 +71,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # CSRF protection (skipped in debug mode)
+    app.add_middleware(CSRFMiddleware)
 
     # Routers
     app.include_router(auth.router, prefix="/api/v1")

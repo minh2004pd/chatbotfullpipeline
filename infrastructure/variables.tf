@@ -66,11 +66,30 @@ variable "desired_count" {
   default     = 1
 }
 
+# ── Auto Scaling ──────────────────────────────────────────────────────────────
+variable "backend_max_count" {
+  description = "Maximum number of backend tasks for auto scaling"
+  type        = number
+  default     = 3
+}
+
+variable "backend_min_count" {
+  description = "Minimum number of backend tasks for auto scaling"
+  type        = number
+  default     = 1
+}
+
+variable "cpu_scaling_target" {
+  description = "Target CPU utilization percentage for auto scaling"
+  type        = number
+  default     = 60
+}
+
 # ── EC2 ─────────────────────────────────────────────────────────────────────
 variable "instance_type" {
   description = "EC2 instance type"
   type        = string
-  default     = "t3.small"
+  default     = "t3.medium"
 }
 
 variable "key_pair_name" {
@@ -172,4 +191,54 @@ variable "soniox_ws_url" {
   description = "Soniox websocket URL"
   type        = string
   default     = "wss://stt-rt.soniox.com/transcribe-websocket"
+}
+
+variable "jwt_secret_key" {
+  description = "JWT signing secret (HS256). Must be 32+ characters."
+  type        = string
+  sensitive   = true
+}
+
+# ── Networking ─────────────────────────────────────────────────────────────────
+variable "vpc_cidr" {
+  description = "VPC CIDR block"
+  type        = string
+  default     = "10.0.0.0/16"
+}
+
+variable "availability_zones" {
+  description = "AWS availability zones"
+  type        = list(string)
+  default     = ["ap-southeast-2a", "ap-southeast-2b"]
+}
+
+variable "public_subnet_cidrs" {
+  description = "CIDR blocks for public subnets"
+  type        = list(string)
+  default     = ["10.0.1.0/24", "10.0.2.0/24"]
+}
+
+variable "private_subnet_cidrs" {
+  description = "CIDR blocks for private subnets"
+  type        = list(string)
+  default     = ["10.0.10.0/24", "10.0.11.0/24"]
+}
+
+# ── RDS PostgreSQL ───────────────────────────────────────────────────────────
+variable "db_instance_class" {
+  description = "RDS instance class for PostgreSQL"
+  type        = string
+  default     = "db.t3.micro"
+}
+
+variable "db_allocated_storage" {
+  description = "Initial allocated storage for RDS (GB)"
+  type        = number
+  default     = 20
+}
+
+variable "db_username" {
+  description = "Master username for RDS PostgreSQL"
+  type        = string
+  default     = "memrag"
 }

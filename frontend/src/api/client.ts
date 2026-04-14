@@ -8,6 +8,7 @@ export const apiClient = axios.create({
   baseURL,
   headers: {
     'Content-Type': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',  // CSRF protection
   },
   withCredentials: true, // send/receive HTTP-only cookies
   // FastAPI expects repeated params for arrays: ?a=1&a=2, not ?a[]=1&a[]=2

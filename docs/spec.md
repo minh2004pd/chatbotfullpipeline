@@ -23,12 +23,14 @@
 | Nhóm | Chi tiết |
 |------|----------|
 | **Chat** | Text + ảnh (base64 inline). Streaming SSE token-by-token qua `POST /api/v1/chat/stream`. Non-streaming qua `POST /api/v1/chat`. |
+| **Authentication** | JWT (HS256) + httpOnly cookies. Đăng ký/đăng nhập email-password hoặc Google OAuth. Access token 15 phút, refresh token 7 ngày (rotation-based, unique jti per refresh). CSRF protection via `X-Requested-With` header. `X-User-ID` header chỉ active khi `DEBUG=true`. Xem `docs/auth.md`. |
 | **RAG** | Upload PDF → chunk (LangChain TextSplitter, 1000/200 overlap) → embed (gemini-embedding-001, 768-dim) → Qdrant. Search qua `search_documents` ADK tool. Danh sách file qua `list_user_documents`. |
 | **Long-term Memory** | mem0ai lưu facts/preferences/summary per user_id vào Qdrant collection `mem0_memories`. Tools: `store_memory`, `retrieve_memory`. |
 | **Session Persistence** | `DynamoDBSessionService` extends ADK `BaseSessionService`. PK=`{app_name}#{user_id}`, SK=`session_id`. Title auto-extract từ first message. `GET /sessions`, `GET /sessions/{id}`, `DELETE /sessions/{id}`. |
 | **Context Filter** | `ContextFilterPlugin` — async `before_model_callback`. Truncation khi `max_context_messages < len < summary_threshold`; auto-summarize (Gemini) khi `≥ summary_threshold` (default 30). Summary lưu vào ADK session state → persist DynamoDB. Frontend vẫn load full history. |
 | **Realtime Transcription** | Soniox STT WebSocket. Flow: `POST /transcription/start` → `POST /transcription/audio/{id}` (binary PCM16) → `GET /transcription/stream/{id}` (SSE) → `POST /transcription/stop/{id}`. Agent có thể search transcript qua `search_meeting_transcripts` tool. |
 | **Meeting Storage** | DynamoDB `memrag-meetings` (single-table). Metadata: `PK=USER#{user_id}, SK=MEETING#{id}`; utterances: `PK=MEETING#{id}, SK=UTTERANCE#{ts}#{seq}`. Qdrant collection `meetings` lưu transcript chunks (time-window 60s / max 300 words). Danh sách meeting qua `list_meetings` ADK tool; search nội dung qua `search_meeting_transcripts`. `GET /meetings`, `GET /meetings/{id}/transcript`, `DELETE /meetings/{id}`. |
+| **Wiki Knowledge Base** | AI-generated structured wiki pages tự động xây dựng sau mỗi ingestion event (PDF upload / transcript stop). 3-tier pipeline: MAP (extract entities+topics) → REDUCE (deduplicate) → SYNTHESIZE (LLM merge content). Frontend React Flow knowledge graph visualization với filtering by source. Xem `docs/wiki.md`. |
 | **File Storage** | S3 (production) hoặc local filesystem. Backend auto-switch qua `STORAGE_BACKEND` env var. Presigned URL 1h cho download. |
 | **Multiuser** | User identity từ `X-User-ID` request header (default `"default_user"`). Tất cả data scoped per user_id. |
 
@@ -152,6 +154,12 @@ CloudFront ──/api/*──► EC2:8000 (FastAPI + Uvicorn)
 | GET | `/api/v1/meetings` | List meetings của user |
 | GET | `/api/v1/meetings/{id}/transcript` | Full transcript của meeting |
 | DELETE | `/api/v1/meetings/{id}` | Xóa meeting (DynamoDB + Qdrant) |
+
+### Wiki
+| Method | Path | Mô tả |
+|--------|------|-------|
+| GET | `/api/v1/wiki/graph` | Lấy nodes + edges cho knowledge graph (React Flow) |
+| GET | `/api/v1/wiki/pages/{category}/{slug}` | Đọc nội dung Markdown của một wiki page |
 
 ---
 
@@ -277,6 +285,19 @@ proj2/
 | `MAX_CONTEXT_MESSAGES` | - | Default: 20 |
 | `SUMMARY_THRESHOLD` | - | Default: 30 (số messages trước khi auto-summarize) |
 | `SUMMARY_KEEP_RECENT` | - | Default: 10 (số messages giữ lại sau summarize) |
+| `WIKI_ENABLED` | - | Default: true |
+| `WIKI_BASE_DIR` | - | Default: `./wiki` |
+| `WIKI_CHUNK_SIZE` | - | Default: 16384 |
+| `WIKI_MAX_ENTITIES_PER_SOURCE` | - | Default: 20 |
+| `WIKI_MAX_TOPICS_PER_SOURCE` | - | Default: 5 |
+| `WIKI_MAX_PARALLEL_EXTRACTIONS` | - | Default: 5 |
+| `WIKI_MAX_PARALLEL_SYNTHESIS` | - | Default: 5 |
+| `JWT_SECRET_KEY` | - | Secret cho JWT signing (HS256). **Phải set trong production**. |
+| `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | - | Default: 15 |
+| `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | - | Default: 7 |
+| `GOOGLE_OAUTH_CLIENT_ID` | - | Google OAuth client ID |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | - | Google OAuth client secret |
+| `GOOGLE_OAUTH_REDIRECT_URI` | - | Google OAuth redirect URI |
 
 ---
 

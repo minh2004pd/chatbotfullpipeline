@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -80,6 +80,9 @@ class Settings(BaseSettings):
 
     # PostgreSQL (auth)
     database_url: str = "postgresql+asyncpg://memrag:memrag@localhost:5432/memrag"
+    database_host: str = ""  # RDS endpoint — set by Terraform in production
+    db_username: str = "memrag"  # RDS master username
+    db_password: str = ""  # RDS password — from SSM Parameter Store
 
     # JWT
     jwt_secret_key: str = ""
@@ -108,6 +111,25 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return [s.strip() for s in v.split(",") if s.strip()]
         return v
+
+    @model_validator(mode="after")
+    def validate_security(self) -> "Settings":
+        # CRITICAL: JWT secret must be set in any non-debug environment
+        if not self.debug and not self.jwt_secret_key:
+            raise ValueError(
+                "JWT_SECRET_KEY is required in production. Set it to a random 32+ character string."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def resolve_database_url(self) -> "Settings":
+        """Build database_url from DATABASE_HOST + DB_PASSWORD in production."""
+        if self.database_host and self.db_password:
+            self.database_url = (
+                f"postgresql+asyncpg://{self.db_username}:{self.db_password}"
+                f"@{self.database_host}:5432/{self.db_username}"
+            )
+        return self
 
     @property
     def max_upload_size_bytes(self) -> int:

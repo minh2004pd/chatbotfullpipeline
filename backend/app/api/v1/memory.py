@@ -24,15 +24,24 @@ async def search_memory(
     return MemorySearchResponse(memories=memories, total=len(memories))
 
 
-@router.get("/user/{user_id}", response_model=UserMemoryResponse)
+@router.get("", response_model=UserMemoryResponse)
 async def get_user_memories(
-    user_id: str,
-    _auth: UserIDDep,
+    user_id: UserIDDep,
     service: MemoryServiceDep,
 ) -> UserMemoryResponse:
-    """Lấy tất cả memories của một user."""
+    """Lấy tất cả memories của authenticated user."""
+    # Sử dụng authenticated user_id từ JWT/header, không dùng URL path parameter
     memories = service.get_all(user_id=user_id)
     return UserMemoryResponse(user_id=user_id, memories=memories, total=len(memories))
+
+
+@router.delete("/all", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_all_memories(
+    user_id: UserIDDep,
+    service: MemoryServiceDep,
+) -> None:
+    """Xóa tất cả memories của authenticated user."""
+    service.delete_all(user_id=user_id)
 
 
 @router.delete("/{memory_id}", response_model=MemoryDeleteResponse)
@@ -44,13 +53,3 @@ async def delete_memory(
     """Xóa một memory cụ thể."""
     service.delete(memory_id=memory_id)
     return MemoryDeleteResponse(memory_id=memory_id)
-
-
-@router.delete("/user/{user_id}/all", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_all_memories(
-    user_id: str,
-    _auth: UserIDDep,
-    service: MemoryServiceDep,
-) -> None:
-    """Xóa tất cả memories của một user."""
-    service.delete_all(user_id=user_id)

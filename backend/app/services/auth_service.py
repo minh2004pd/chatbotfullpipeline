@@ -100,7 +100,17 @@ class AuthService:
                     "grant_type": "authorization_code",
                 },
             )
-            token_resp.raise_for_status()
+            if token_resp.status_code != 200:
+                error_detail = token_resp.json().get("error_description", token_resp.text)
+                logger.warning(
+                    "google_token_exchange_failed",
+                    status=token_resp.status_code,
+                    error=error_detail,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Google OAuth thất bại: {error_detail}",
+                )
             token_data = token_resp.json()
 
             id_token = token_data.get("id_token")
@@ -124,11 +134,19 @@ class AuthService:
         email = userinfo.get("email", "").lower()
         name = userinfo.get("name", "")
         picture = userinfo.get("picture", "")
+        email_verified = userinfo.get("email_verified", False)
 
         if not email or not google_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Không lấy được thông tin từ Google.",
+            )
+
+        # SECURITY: Only link accounts if Google verified the email
+        if not email_verified:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email chưa được xác minh bởi Google.",
             )
 
         # Upsert user
@@ -185,6 +203,8 @@ class AuthService:
                 detail="Token không phải refresh token.",
             )
 
+        # Refresh token rotation: verify jti matches stored jti
+        token_jti = payload.get("jti")
         user_id = payload["sub"]
         user = await db.get(User, user_id)
         if not user or not user.is_active:
@@ -193,13 +213,29 @@ class AuthService:
                 detail="User không tồn tại hoặc đã bị vô hiệu hóa.",
             )
 
+        if not user.refresh_token_jti or user.refresh_token_jti != token_jti:
+            # Token reuse detected — invalidate all tokens
+            user.refresh_token_jti = None
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token đã được sử dụng. Vui lòng đăng nhập lại.",
+            )
+
         logger.info("token_refreshed", user_id=user.id)
         return self._make_token_pair(user)
 
     def _make_token_pair(self, user: User) -> TokenPair:
+        """Create token pair and store refresh token jti for rotation."""
+        access = create_access_token(user.id)
+        refresh = create_refresh_token(user.id)
+
+        # Extract jti from the new refresh token and store it
+        refresh_payload = decode_token(refresh)
+        user.refresh_token_jti = refresh_payload["jti"]
+
         return TokenPair(
-            access_token=create_access_token(user.id),
-            refresh_token=create_refresh_token(user.id),
+            access_token=access,
+            refresh_token=refresh,
             user=user,
         )
 

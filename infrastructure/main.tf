@@ -5,6 +5,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
   }
 
   # Uncomment để lưu state trên S3 thay vì local (recommended cho team)
@@ -18,6 +22,8 @@ terraform {
 provider "aws" {
   region = var.aws_region
 }
+
+provider "random" {}
 
 # Lấy account ID hiện tại (dùng trong IAM policy)
 data "aws_caller_identity" "current" {}

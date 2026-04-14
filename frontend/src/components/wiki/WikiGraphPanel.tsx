@@ -17,8 +17,9 @@ import type { WikiGraphNode } from '@/types'
 import { useWikiGraph } from '@/hooks/useWikiGraph'
 import { useChatStore } from '@/store/chatStore'
 import { useDocuments } from '@/hooks/useDocuments'
-import { applyDagreLayout } from '@/utils/wikiGraphLayout'
 import { getNodeColor } from '@/utils/wikiNodeColors'
+import { useDebounceValue } from '@/utils/debounce'
+import { useGraphLayout } from '@/hooks/useGraphLayout'
 import { WikiNodeCard } from './WikiNodeCard'
 import WikiPageDrawer from './WikiPageDrawer'
 
@@ -28,7 +29,7 @@ function toWikiNode(node: Node): WikiGraphNode {
   return node.data as unknown as WikiGraphNode
 }
 
-export default function WikiGraphPanel() {
+const WikiGraphPanel = React.memo(function WikiGraphPanel() {
   const userId = useChatStore((s) => s.userId)
   const activeWikiNodes = useChatStore((s) => s.activeWikiNodes)
   const [showSummaries, setShowSummaries] = useState(false)
@@ -40,15 +41,21 @@ export default function WikiGraphPanel() {
 
   const { documents } = useDocuments()
 
+  // Debounce filter changes to prevent excessive API calls
+  const debouncedShowStubs = useDebounceValue(showStubs, 400)
+  const debouncedShowSummaries = useDebounceValue(showSummaries, 400)
+  const debouncedSourceIds = useDebounceValue(selectedSourceIds, 400)
+
   const { data, isLoading, isError, refetch, isFetching } = useWikiGraph({
     userId,
-    showStubs,
-    showSummaries,
-    sourceIds: selectedSourceIds,
+    showStubs: debouncedShowStubs,
+    showSummaries: debouncedShowSummaries,
+    sourceIds: debouncedSourceIds,
   })
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+  const { applyLayout } = useGraphLayout()
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -61,15 +68,18 @@ export default function WikiGraphPanel() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  // Rebuild graph khi data hoặc activeWikiNodes thay đổi
-  useEffect(() => {
-    if (!data) return
+  // Convert activeWikiNodes array to Set for faster lookups
+  const activeWikiNodesSet = useMemo(() => new Set(activeWikiNodes), [activeWikiNodes])
+
+  // Rebuild graph khi data hoặc activeWikiNodes thay đổi - optimized with useMemo
+  const graphElements = useMemo(() => {
+    if (!data) return { nodes: [], edges: [] }
 
     const rfNodes: Node[] = data.nodes.map((n) => ({
       id: n.key,   // unique key = "{category}/{slug}"
       type: 'wikiNode',
       position: { x: 0, y: 0 },
-      data: { ...n, isActive: activeWikiNodes.includes(n.key) } as unknown as Record<string, unknown>,
+      data: { ...n, isActive: activeWikiNodesSet.has(n.key) } as unknown as Record<string, unknown>,
       selected: selectedNode?.key === n.key,
     }))
 
@@ -81,9 +91,22 @@ export default function WikiGraphPanel() {
       animated: false,
     }))
 
-    setNodes(applyDagreLayout(rfNodes, rfEdges))
-    setEdges(rfEdges)
-  }, [data, activeWikiNodes]) // eslint-disable-line react-hooks/exhaustive-deps
+    return { nodes: rfNodes, edges: rfEdges }
+  }, [data, activeWikiNodesSet, selectedNode?.key])
+
+  // Apply dagre layout and update nodes/edges
+  useEffect(() => {
+    if (graphElements.nodes.length === 0) {
+      setNodes([])
+      setEdges([])
+      return
+    }
+
+    applyLayout(graphElements.nodes, graphElements.edges, (layoutedNodes) => {
+      setNodes(layoutedNodes)
+      setEdges(graphElements.edges)
+    })
+  }, [graphElements, applyLayout, setNodes, setEdges])
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     const wikiNode = toWikiNode(node)
@@ -100,7 +123,10 @@ export default function WikiGraphPanel() {
     [data],
   )
 
-  const miniMapNodeColor = useCallback((node: Node) => getNodeColor(toWikiNode(node).type), [])
+  const miniMapNodeColor = useCallback((node: Node) => {
+    const wikiNode = toWikiNode(node)
+    return wikiNode?.type ? getNodeColor(wikiNode.type) : '#666'
+  }, [])
 
   const legend = useMemo(() => {
     if (!data) return []
@@ -248,11 +274,11 @@ export default function WikiGraphPanel() {
         </div>
 
         {/* States */}
-        {isLoading && (
+        {(isLoading || isFetching) && (
           <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-            <div className="flex items-center gap-2 text-[#555] text-sm">
+            <div className="flex items-center gap-2 text-[#555] text-sm bg-[#0f0f0f]/80 px-4 py-2 rounded-lg">
               <Loader2 size={16} className="animate-spin" />
-              Building knowledge graph...
+              {isLoading ? 'Building knowledge graph...' : 'Updating graph...'}
             </div>
           </div>
         )}
@@ -340,4 +366,6 @@ export default function WikiGraphPanel() {
       )}
     </div>
   )
-}
+})
+
+export default WikiGraphPanel

@@ -16,6 +16,7 @@ Cấu trúc thư mục:
   └── wiki_schema.md     # schema/hiến pháp của wiki (tầng 3)
 """
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -24,6 +25,11 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 _LOG_MAX_LINES = 1000  # rotate log.md khi quá số dòng này
+
+
+def _to_thread(fn, /, *args, **kwargs):
+    """Run sync I/O in thread pool — prevents event loop blocking."""
+    return asyncio.to_thread(fn, *args, **kwargs)
 
 
 class WikiRepository:
@@ -118,15 +124,24 @@ class WikiRepository:
         """Đọc nội dung trang Wiki. rel_path: "pages/topics/q1-planning.md"."""
         return self._read(user_id, rel_path)
 
+    async def aread_page(self, *, user_id: str, rel_path: str) -> str | None:
+        return await _to_thread(self.read_page, user_id=user_id, rel_path=rel_path)
+
     def write_page(self, *, user_id: str, rel_path: str, content: str) -> None:
         """Ghi nội dung trang Wiki (overwrite)."""
         self._write(user_id, rel_path, content)
         logger.debug("wiki_page_written", user_id=user_id, path=rel_path)
 
+    async def awrite_page(self, *, user_id: str, rel_path: str, content: str) -> None:
+        await _to_thread(self.write_page, user_id=user_id, rel_path=rel_path, content=content)
+
     def delete_page(self, *, user_id: str, rel_path: str) -> None:
         """Xóa trang Wiki."""
         self._delete(user_id, rel_path)
         logger.debug("wiki_page_deleted", user_id=user_id, path=rel_path)
+
+    async def adelete_page(self, *, user_id: str, rel_path: str) -> None:
+        await _to_thread(self.delete_page, user_id=user_id, rel_path=rel_path)
 
     def list_pages_in_category(self, *, user_id: str, category: str) -> list[str]:
         """
@@ -153,6 +168,9 @@ class WikiRepository:
                 )
         return result
 
+    async def alist_all_pages(self, *, user_id: str) -> list[dict]:
+        return await _to_thread(self.list_all_pages, user_id=user_id)
+
     # ── Index & Log ───────────────────────────────────────────────────────────
 
     def read_schema(self, *, user_id: str) -> str:
@@ -160,13 +178,22 @@ class WikiRepository:
         Trả về "" nếu chưa khởi tạo (first ingest sẽ tạo file này)."""
         return self._read(user_id, "wiki_schema.md") or ""
 
+    async def aread_schema(self, *, user_id: str) -> str:
+        return await _to_thread(self.read_schema, user_id=user_id)
+
     def read_index(self, *, user_id: str) -> str:
         """Đọc index.md — trả về "" nếu chưa có."""
         return self._read(user_id, "index.md") or ""
 
+    async def aread_index(self, *, user_id: str) -> str:
+        return await _to_thread(self.read_index, user_id=user_id)
+
     def write_index(self, *, user_id: str, content: str) -> None:
         """Ghi index.md."""
         self._write(user_id, "index.md", content)
+
+    async def awrite_index(self, *, user_id: str, content: str) -> None:
+        await _to_thread(self.write_index, user_id=user_id, content=content)
 
     def append_log(self, *, user_id: str, entry: str) -> None:
         """Append một dòng vào log.md. Tự động rotate khi quá _LOG_MAX_LINES."""
@@ -177,6 +204,9 @@ class WikiRepository:
         if len(lines) > _LOG_MAX_LINES:
             lines = lines[-_LOG_MAX_LINES:]
         self._write(user_id, "log.md", "\n".join(lines) + "\n")
+
+    async def aappend_log(self, *, user_id: str, entry: str) -> None:
+        await _to_thread(self.append_log, user_id=user_id, entry=entry)
 
     # ── Link index ───────────────────────────────────────────────────────────
 
@@ -191,15 +221,26 @@ class WikiRepository:
         except json.JSONDecodeError:
             return {}
 
+    async def aread_link_index(self, *, user_id: str) -> dict[str, list[str]]:
+        return await _to_thread(self.read_link_index, user_id=user_id)
+
     def write_link_index(self, *, user_id: str, data: dict[str, list[str]]) -> None:
         """Ghi toàn bộ forward link index (overwrite)."""
         self._write(user_id, "link_index.json", json.dumps(data, ensure_ascii=False, indent=2))
+
+    async def awrite_link_index(self, *, user_id: str, data: dict[str, list[str]]) -> None:
+        await _to_thread(self.write_link_index, user_id=user_id, data=data)
 
     # ── Raw sources ───────────────────────────────────────────────────────────
 
     def write_raw(self, *, user_id: str, category: str, filename: str, content: str) -> None:
         """Lưu text thô. category: "documents" | "transcripts"."""
         self._write(user_id, f"raw/{category}/{filename}", content)
+
+    async def awrite_raw(self, *, user_id: str, category: str, filename: str, content: str) -> None:
+        await _to_thread(
+            self.write_raw, user_id=user_id, category=category, filename=filename, content=content
+        )
 
     def read_raw(self, *, user_id: str, category: str, filename: str) -> str | None:
         return self._read(user_id, f"raw/{category}/{filename}")
@@ -212,6 +253,9 @@ class WikiRepository:
             if self._s3 or self._local_path(user_id, rel).exists():
                 self._delete(user_id, rel)
                 logger.debug("wiki_raw_deleted", user_id=user_id, path=rel)
+
+    async def adelete_raw(self, *, user_id: str, source_id: str) -> None:
+        await _to_thread(self.delete_raw, user_id=user_id, source_id=source_id)
 
     # ── Init ─────────────────────────────────────────────────────────────────
 
@@ -233,6 +277,9 @@ class WikiRepository:
                 "pages/summaries",
             ):
                 Path(self._base_dir, user_id, sub).mkdir(parents=True, exist_ok=True)
+
+    async def aensure_wiki_structure(self, *, user_id: str) -> None:
+        await _to_thread(self.ensure_wiki_structure, user_id=user_id)
 
 
 _INITIAL_INDEX = """\

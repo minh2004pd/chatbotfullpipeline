@@ -20,6 +20,7 @@ Sơ đồ dependency graph:
 from functools import lru_cache
 from typing import Annotated
 
+import jwt
 from fastapi import Depends, HTTPException, Request, status
 from google.adk.runners import Runner
 from mem0 import Memory
@@ -49,8 +50,16 @@ from app.services.wiki_service import WikiService
 async def get_current_user(
     request: Request,
     db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
 ) -> User:
-    """Extract user from JWT cookie. Fallback to X-User-ID header (dev mode)."""
+    """Extract user from JWT cookie.
+
+    Auth flow (production-safe):
+    1. Try JWT cookie → decode → lookup DB → return User
+    2. If JWT expired → raise 401 (triggers frontend refresh interceptor)
+    3. If no JWT and DEBUG=true → fall back to X-User-ID header (dev only)
+    4. If no JWT and DEBUG=false → raise 401 (no anonymous access in production)
+    """
     # Try JWT cookie first
     token = request.cookies.get("access_token")
     if token:
@@ -60,46 +69,66 @@ async def get_current_user(
             user = await db.get(User, user_id)
             if user and user.is_active:
                 return user
+        except jwt.ExpiredSignatureError:
+            # Token expired — return 401 so frontend refresh interceptor kicks in
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.",
+            )
         except Exception:
-            pass  # fall through to header
-        # JWT present but user not found → raise 401 (don't silently fallback to default_user)
+            pass  # JWT present but invalid — fall through to header/dev check
+
+        # JWT present but user not found → raise 401
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User không tồn tại hoặc đã bị khóa. Vui lòng đăng nhập lại.",
         )
 
-    # Backward compat: X-User-ID header (dev mode / API access without auth)
-    x_user_id = request.headers.get("x-user-id")
-    if x_user_id and x_user_id != "default_user":
-        from sqlalchemy import select as sa_select
+    # No JWT — check if dev mode allows X-User-ID header
+    if settings.debug:
+        x_user_id = request.headers.get("x-user-id")
+        if x_user_id and x_user_id != "default_user":
+            # Validate length
+            if len(x_user_id) > 100:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="X-User-ID header quá dài (tối đa 100 ký tự).",
+                )
+            user = await db.get(User, x_user_id)
+            if user and user.is_active:
+                return user
 
-        result = await db.execute(sa_select(User).where(User.id == x_user_id))
-        user = result.scalar_one_or_none()
-        if user and user.is_active:
-            return user
-
-    # No JWT, no valid X-User-ID → return pseudo-user for unauthenticated access
-    pseudo_id = x_user_id if x_user_id else "default_user"
-    # Validate length to prevent oversized IDs
-    if len(pseudo_id) > 100:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="X-User-ID header quá dài (tối đa 100 ký tự).",
-        )
-    return User(
-        id=pseudo_id,
-        email=pseudo_id,
-        display_name=pseudo_id,
+    # No valid auth → raise 401 (no pseudo-user)
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Yêu cầu đăng nhập.",
     )
+
+
+async def get_current_user_optional(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> User | None:
+    """Optional auth — returns User if authenticated, None otherwise.
+
+    For endpoints that work with or without login (e.g., public health checks).
+    """
+    try:
+        return await get_current_user(request, db, settings)
+    except HTTPException:
+        return None
 
 
 async def get_current_user_id(
     request: Request,
     db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
 ) -> str:
-    """Return user_id as string — drop-in replacement for old get_user_id."""
-    user = await get_current_user(request, db)
-    return str(user.id) if user.id else "default_user"
+    """Return user_id as string — drop-in replacement for old get_user_id.
+    Raises 401 if not authenticated."""
+    user = await get_current_user(request, db, settings)
+    return str(user.id)
 
 
 # --- Infrastructure (lru_cache singletons) ---

@@ -127,5 +127,5 @@ async def normalize_wiki_slugs(
     """
     if not settings.wiki_enabled:
         return WikiNormalizeResponse(renamed=0, merged=0, skipped=0)
-    stats = wiki_service.normalize_page_filenames(user_id=user_id)
+    stats = await wiki_service.normalize_page_filenames(user_id=user_id)
     return WikiNormalizeResponse(**stats)

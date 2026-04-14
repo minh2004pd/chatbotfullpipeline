@@ -17,13 +17,14 @@ resource "aws_lb" "backend" {
 }
 
 # ── Target Group ─────────────────────────────────────────────────────────────
-# target_type = "ip" bắt buộc khi dùng awsvpc network mode
+# target_type = "instance" cho EC2 launch type với host network mode
+# ECS auto-registers EC2 instance ID vào target group
 resource "aws_lb_target_group" "backend" {
-  name        = "${var.project_name}-backend-tg"
+  name        = "${var.project_name}-backend-tg-v2"
   port        = var.container_port
   protocol    = "HTTP"
   vpc_id      = aws_vpc.main.id
-  target_type = "ip"
+  target_type = "instance"
 
   # FastAPI health check endpoint (không có /api prefix)
   health_check {
@@ -40,6 +41,10 @@ resource "aws_lb_target_group" "backend" {
 
   # Graceful deregistration: cho phép in-flight requests hoàn thành
   deregistration_delay = 30
+
+  lifecycle {
+    create_before_destroy = true
+  }
 
   tags = {
     Project = var.project_name

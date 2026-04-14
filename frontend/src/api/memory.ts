@@ -2,10 +2,9 @@ import type { ListMemoriesResponse, DeleteMemoryResponse } from '@/types'
 import { apiClient } from './client'
 
 export const memoryApi = {
-  list: async (userId: string): Promise<ListMemoriesResponse> => {
-    const res = await apiClient.get<ListMemoriesResponse>(
-      `/api/v1/memory/user/${encodeURIComponent(userId)}`,
-    )
+  list: async (): Promise<ListMemoriesResponse> => {
+    // Backend dùng authenticated user_id từ JWT/header — không cần truyền userId
+    const res = await apiClient.get<ListMemoriesResponse>('/api/v1/memory')
     return res.data
   },
 
@@ -16,9 +15,7 @@ export const memoryApi = {
     return res.data
   },
 
-  deleteAll: async (userId: string): Promise<void> => {
-    await apiClient.delete(
-      `/api/v1/memory/user/${encodeURIComponent(userId)}/all`,
-    )
+  deleteAll: async (): Promise<void> => {
+    await apiClient.delete('/api/v1/memory/all')
   },
 }
