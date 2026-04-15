@@ -7,7 +7,7 @@ Lý do dùng in-memory thay vì DB:
 """
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 _EXPIRE_SECS = 600  # auto-expire sau 10 phút
 
@@ -15,7 +15,7 @@ _EXPIRE_SECS = 600  # auto-expire sau 10 phút
 @dataclass
 class _WikiEntry:
     status: str  # "processing" | "done" | "error"
-    created_at: float = field(default_factory=time.monotonic)
+    created_at: float = 0.0
 
 
 # {user_id: {document_id: _WikiEntry}}
@@ -26,7 +26,7 @@ def set_wiki_status(user_id: str, document_id: str, status: str) -> None:
     """Ghi trạng thái wiki indexing cho một document."""
     if user_id not in _store:
         _store[user_id] = {}
-    _store[user_id][document_id] = _WikiEntry(status=status)
+    _store[user_id][document_id] = _WikiEntry(status=status, created_at=time.monotonic())
 
 
 def get_wiki_status(user_id: str, document_id: str) -> str | None:

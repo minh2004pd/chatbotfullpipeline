@@ -5,12 +5,24 @@ import structlog
 from botocore.exceptions import ClientError
 from mem0 import Memory
 from qdrant_client import AsyncQdrantClient, QdrantClient
-from qdrant_client.models import Distance, VectorParams
+from qdrant_client.models import Distance, PayloadSchemaType, VectorParams
 
 from app.core.config import get_settings
 from app.core.llm_config import get_llm_config
 
 logger = structlog.get_logger(__name__)
+
+
+def _ensure_payload_index(client: QdrantClient, collection: str, field_name: str) -> None:
+    """Create payload field index if not exists. Idempotent."""
+    try:
+        client.create_payload_index(
+            collection_name=collection,
+            field_name=field_name,
+            field_schema=PayloadSchemaType.KEYWORD,
+        )
+    except Exception:
+        pass  # Already exists or collection missing — safe to ignore
 
 
 def _embedding_dim() -> int:
@@ -112,6 +124,11 @@ async def ensure_collections() -> None:
                 vectors_config=VectorParams(size=target_dim, distance=Distance.COSINE),
             )
             logger.info("collection_ready", name=collection_name, dimension=target_dim)
+
+    # Ensure payload indexes for fast filtering (idempotent)
+    _ensure_payload_index(client, settings.qdrant_collection_rag, "file_hash")
+    _ensure_payload_index(client, settings.qdrant_collection_rag, "user_id")
+    _ensure_payload_index(client, settings.qdrant_collection_rag, "document_id")
 
 
 @lru_cache

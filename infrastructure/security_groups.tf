@@ -73,11 +73,11 @@ resource "aws_security_group" "qdrant" {
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    description     = "Qdrant REST API from backend"
+    description     = "Qdrant REST API from backend (host network mode)"
     from_port       = 6333
     to_port         = 6333
     protocol        = "tcp"
-    security_groups = [aws_security_group.backend_new.id]
+    security_groups = [aws_security_group.ecs_host.id]
   }
 
   egress {

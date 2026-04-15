@@ -1,3 +1,4 @@
+import hashlib
 import uuid
 
 import structlog
@@ -28,6 +29,7 @@ class QdrantRepository:
         document_id: str,
         filename: str,
         user_id: str,
+        file_hash: str = "",
     ) -> int:
         points = [
             PointStruct(
@@ -39,6 +41,7 @@ class QdrantRepository:
                     "filename": filename,
                     "user_id": user_id,
                     "chunk_index": idx,
+                    "file_hash": file_hash,
                 },
             )
             for idx, (chunk, embedding) in enumerate(zip(chunks, embeddings))
@@ -102,6 +105,28 @@ class QdrantRepository:
                 }
 
         return list(seen.values())
+
+    def find_by_hash(self, user_id: str, file_hash: str) -> dict | None:
+        """Check if a file with the same hash already exists for this user."""
+        results, _ = self.client.scroll(
+            collection_name=self.collection,
+            scroll_filter=Filter(
+                must=[
+                    FieldCondition(key="user_id", match=MatchValue(value=user_id)),
+                    FieldCondition(key="file_hash", match=MatchValue(value=file_hash)),
+                ]
+            ),
+            with_payload=True,
+            limit=1,
+        )
+        if results:
+            p = results[0].payload
+            return {
+                "document_id": p["document_id"],
+                "filename": p["filename"],
+                "user_id": p["user_id"],
+            }
+        return None
 
     def delete_document(self, document_id: str) -> None:
         self.client.delete(

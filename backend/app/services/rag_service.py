@@ -1,5 +1,7 @@
 """RAG Service: xử lý ingestion và search tài liệu."""
 
+import hashlib
+
 import structlog
 
 from app.core.config import Settings
@@ -35,6 +37,15 @@ class RAGService:
         if len(file_bytes) > self.settings.max_upload_size_bytes:
             raise ValueError(f"File quá lớn. Tối đa {self.settings.max_upload_size_mb}MB.")
 
+        # Check duplicate by content hash
+        file_hash = hashlib.sha256(file_bytes).hexdigest()
+        existing = self.repo.find_by_hash(user_id=user_id, file_hash=file_hash)
+        if existing:
+            raise ValueError(
+                f"File '{existing['filename']}' đã được upload trước đó "
+                f"(document_id: {existing['document_id']})."
+            )
+
         document_id = _new_id()
         self.storage.save(file_bytes, user_id=user_id, document_id=document_id, filename=filename)
 
@@ -55,9 +66,10 @@ class RAGService:
             document_id=document_id,
             filename=filename,
             user_id=user_id,
+            file_hash=file_hash,
         )
 
-        logger.info("rag_ingest_done", document_id=document_id, chunks=chunk_count)
+        logger.info("rag_ingest_done", document_id=document_id, chunks=chunk_count, file_hash=file_hash)
         return document_id, chunk_count
 
     def search(self, query: str, user_id: str | None = None) -> list[dict]:

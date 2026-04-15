@@ -100,7 +100,7 @@ class WikiService:
             set_wiki_status(user_id, document_id, "done")
         except Exception as e:
             set_wiki_status(user_id, document_id, "error")
-            logger.error("wiki_update_document_failed", document_id=document_id, error=str(e))
+            logger.error("wiki_update_document_failed", document_id=document_id, error=str(e), exc_info=True)
 
     async def update_wiki_from_transcript(
         self,
@@ -380,6 +380,16 @@ class WikiService:
             self._settings.wiki_max_topics_per_source,
         )
 
+        # Defensive: ensure all item fields are strings (LLM can return lists)
+        for item in deduped_items:
+            item["slug"] = _slugify(_ensure_str(item.get("slug", "")))
+            item["category"] = _ensure_str(item.get("category", "entities"))
+            item["title"] = _ensure_str(item.get("title", ""))
+            if "type" in item:
+                item["type"] = _ensure_str(item.get("type", ""))
+        # Remove items with empty slug after sanitization
+        deduped_items = [it for it in deduped_items if it["slug"]]
+
         slug_to_chunks = _build_slug_to_chunks(
             extractions,
             deduped_items,
@@ -398,7 +408,13 @@ class WikiService:
         all_processed_paths: set[str] = set()
 
         for item in deduped_items:
+            # Handle case where slug might be a list
             slug = item.get("slug", "")
+            if isinstance(slug, list):
+                slug = slug[0] if slug else ""
+            if slug is None or not isinstance(slug, str):
+                slug = str(slug) if slug is not None else ""
+
             category = item.get("category", "summaries")
             if not slug:
                 continue
@@ -429,7 +445,13 @@ class WikiService:
         ) -> tuple[str, str | None]:
             """Synthesize 1 page, trả về (rel_path, new_content_or_None)."""
             async with semaphore_synth:
+                # Handle case where slug might be a list
                 slug = item.get("slug", "")
+                if isinstance(slug, list):
+                    slug = slug[0] if slug else ""
+                if slug is None or not isinstance(slug, str):
+                    slug = str(slug) if slug is not None else ""
+
                 category = item.get("category", "summaries")
                 title = item.get("title", slug)
                 topic_type = item.get("type", "")
@@ -473,7 +495,7 @@ class WikiService:
                     self._update_link_index(user_id=user_id, rel_path=rel_path, new_links=links)
                 )
                 ghost_stub_tasks.append(
-                    await self._create_ghost_stubs(
+                    self._create_ghost_stubs(
                         user_id=user_id,
                         content=new_content,
                         source_id=source_id,
@@ -561,26 +583,9 @@ class WikiService:
                     # Entities — giữ lại "type" để dùng đúng template synthesis
                     for e in parsed.get("entities", []):
                         if isinstance(e, dict) and e.get("slug"):
-                            # Handle case where LLM returns a list instead of string
-                            raw_slug = e["slug"]
-                            if isinstance(raw_slug, list):
-                                raw_slug = raw_slug[0] if raw_slug else ""
-                            if raw_slug is None or not isinstance(raw_slug, str):
-                                raw_slug = str(raw_slug) if raw_slug is not None else ""
-
-                            # Handle type field similarly
-                            raw_type = e.get("type", "")
-                            if isinstance(raw_type, list):
-                                raw_type = ", ".join(str(t) for t in raw_type) if raw_type else ""
-                            elif raw_type is None or not isinstance(raw_type, str):
-                                raw_type = str(raw_type) if raw_type is not None else ""
-
-                            # Handle title field
-                            raw_title = e.get("title", raw_slug)
-                            if isinstance(raw_title, list):
-                                raw_title = raw_title[0] if raw_title else raw_slug
-                            elif raw_title is None or not isinstance(raw_title, str):
-                                raw_title = str(raw_title) if raw_title is not None else raw_slug
+                            raw_slug = _ensure_str(e["slug"])
+                            raw_type = _ensure_str(e.get("type", ""))
+                            raw_title = _ensure_str(e.get("title"), raw_slug)
 
                             entities.append(
                                 {
@@ -594,19 +599,8 @@ class WikiService:
                     # Topics
                     for t in parsed.get("topics", []):
                         if isinstance(t, dict) and t.get("slug"):
-                            # Handle case where LLM returns a list instead of string
-                            raw_slug = t["slug"]
-                            if isinstance(raw_slug, list):
-                                raw_slug = raw_slug[0] if raw_slug else ""
-                            if raw_slug is None or not isinstance(raw_slug, str):
-                                raw_slug = str(raw_slug) if raw_slug is not None else ""
-
-                            # Handle title field
-                            raw_title = t.get("title", raw_slug)
-                            if isinstance(raw_title, list):
-                                raw_title = raw_title[0] if raw_title else raw_slug
-                            elif raw_title is None or not isinstance(raw_title, str):
-                                raw_title = str(raw_title) if raw_title is not None else raw_slug
+                            raw_slug = _ensure_str(t["slug"])
+                            raw_title = _ensure_str(t.get("title"), raw_slug)
 
                             topics.append(
                                 {
@@ -642,23 +636,8 @@ class WikiService:
                     # Summary — luôn có đúng 1
                     s = parsed.get("summary")
                     if isinstance(s, dict) and s.get("slug"):
-                        # Handle case where LLM returns a list instead of string
-                        raw_slug = s["slug"]
-                        if isinstance(raw_slug, list):
-                            raw_slug = raw_slug[0] if raw_slug else ""
-                        if raw_slug is None or not isinstance(raw_slug, str):
-                            raw_slug = str(raw_slug) if raw_slug is not None else ""
-
-                        # Handle title field
-                        raw_title = s.get("title", f"Tóm tắt: {source_name}")
-                        if isinstance(raw_title, list):
-                            raw_title = raw_title[0] if raw_title else f"Tóm tắt: {source_name}"
-                        elif raw_title is None or not isinstance(raw_title, str):
-                            raw_title = (
-                                str(raw_title)
-                                if raw_title is not None
-                                else f"Tóm tắt: {source_name}"
-                            )
+                        raw_slug = _ensure_str(s["slug"])
+                        raw_title = _ensure_str(s.get("title"), f"Tóm tắt: {source_name}")
 
                         summary = {
                             "slug": _slugify(raw_slug),
@@ -1001,6 +980,17 @@ class WikiService:
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
+def _ensure_str(value: object, fallback: str = "") -> str:
+    """Normalize LLM response values — handle list/dict/None → str."""
+    if value is None:
+        return fallback
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return str(value[0]) if value else fallback
+    return str(value)
+
+
 def _split_text_for_extraction(text: str, chunk_size: int) -> list[str]:
     """Split text thành chunks ~chunk_size chars tại paragraph/sentence boundaries.
 
@@ -1069,6 +1059,12 @@ def _reduce_extractions(
         for item in extraction.items:
             category = item.get("category", "")
             slug = item.get("slug", "")
+            # Handle case where slug might be a list
+            if isinstance(slug, list):
+                slug = slug[0] if slug else ""
+            if slug is None or not isinstance(slug, str):
+                slug = str(slug) if slug is not None else ""
+
             if not slug or category not in ("entities", "topics"):
                 continue
             key = (category, slug)
@@ -1135,7 +1131,13 @@ def _build_slug_to_chunks(
     - Luôn include ít nhất 1 chunk
     """
     # Build set of slugs we care about
-    target_slugs = {item["slug"] for item in deduped_items}
+    target_slugs = set()
+    for item in deduped_items:
+        slug = item.get("slug", "")
+        if isinstance(slug, list):
+            slug = slug[0] if slug else ""
+        if slug and isinstance(slug, str):
+            target_slugs.add(slug)
 
     # Map slug → list of chunk texts
     slug_to_chunks: dict[str, list[str]] = {slug: [] for slug in target_slugs}
@@ -1146,6 +1148,8 @@ def _build_slug_to_chunks(
     for extraction in sorted_extractions:
         for item in extraction.items:
             slug = item.get("slug", "")
+            if isinstance(slug, list):
+                slug = slug[0] if slug else ""
             if slug in target_slugs:
                 current_total = sum(len(t) for t in slug_to_chunks[slug])
                 # Always include at least 1 chunk

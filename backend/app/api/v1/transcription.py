@@ -169,7 +169,8 @@ async def stop_transcription(meeting_id: str, user_id: UserIDDep):
         title = meeting_meta.get("title", "Untitled") if meeting_meta else "Untitled"
         rag = _get_transcript_rag()
         try:
-            rag.ingest_utterances(
+            await asyncio.to_thread(
+                rag.ingest_utterances,
                 meeting_id=meeting_id,
                 user_id=user_id,
                 title=title,

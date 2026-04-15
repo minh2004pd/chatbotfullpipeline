@@ -18,6 +18,14 @@
           }
         ]
       }
+    ],
+    "OnTaskComplete": [
+      {
+        "type": "command",
+        "command": "cd /home/minhdd/pet_proj/proj2/backend && uv run pytest tests/ --tb=short -q",
+        "timeout": 120,
+        "statusMessage": "Running tests after task completion..."
+      }
     ]
   }
 }

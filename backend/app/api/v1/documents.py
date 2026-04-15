@@ -43,7 +43,7 @@ async def upload_document(
             detail=f"File quá lớn. Tối đa {settings.max_upload_size_mb}MB.",
         )
 
-    result = service.upload_pdf(file_bytes=file_bytes, filename=file.filename, user_id=user_id)
+    result = await asyncio.to_thread(service.upload_pdf, file_bytes=file_bytes, filename=file.filename, user_id=user_id)
 
     # Fire-and-forget: tổng hợp wiki từ tài liệu vừa upload (background, không block response)
     if settings.wiki_enabled:
@@ -87,7 +87,7 @@ async def list_documents(
     service: DocumentServiceDep,
 ) -> DocumentListResponse:
     """Lấy danh sách tài liệu đã upload của user."""
-    documents = service.list_documents(user_id=user_id)
+    documents = await asyncio.to_thread(service.list_documents, user_id=user_id)
     return DocumentListResponse(documents=documents, total=len(documents))
 
 
@@ -100,7 +100,7 @@ async def delete_document(
     wiki_service: WikiServiceDep,
 ) -> DocumentDeleteResponse:
     """Xóa tài liệu và tất cả chunks trong Qdrant."""
-    service.delete_document(document_id=document_id)
+    await asyncio.to_thread(service.delete_document, document_id=document_id)
 
     # Fire-and-forget: dọn dẹp wiki pages liên quan đến tài liệu bị xóa
     if settings.wiki_enabled:

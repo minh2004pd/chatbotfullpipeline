@@ -5,7 +5,12 @@ Dùng app.dependency_overrides thay vì unittest.mock.patch —
 sạch hơn, không cần biết module path của import.
 """
 
+# MUST set env vars BEFORE importing app modules — app/main.py calls create_app() at module level
 import os
+
+os.environ["DEBUG"] = "true"
+os.environ["JWT_SECRET_KEY"] = "test-secret-key-for-testing-only-32chars"
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -20,10 +25,6 @@ from app.main import create_app
 
 @pytest.fixture
 def app():
-    # Force debug mode for tests — skips JWT validation and CSRF
-    os.environ["DEBUG"] = "true"
-    os.environ["JWT_SECRET_KEY"] = "test-secret-key-for-testing-only-32chars"
-
     # Clear cached settings so it re-reads from env
     get_settings.cache_clear()
 
