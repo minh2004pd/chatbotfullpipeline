@@ -93,7 +93,8 @@ HTTP Request → FastAPI Router (api/v1/) → Service Layer → Repository / ADK
 - Cấu trúc: `wiki/{user_id}/pages/{entities|topics|summaries}/`, `raw/`, `index.md`, `log.md`, `CLAUDE.md` (schema).
 - Entity taxonomy: `model`, `framework`, `dataset`, `benchmark`, `researcher`, `lab`, `tool`, `method`, `concept` — phân biệt `method` (algorithm cụ thể có thể implement) vs `concept` (paradigm tổng quát).
 - Pipeline: `_extract_topics()` (LLM → JSON `{entities, topics, summary}`) → synthesize pages → `_update_link_index()` → `_create_ghost_stubs()` → `_update_related_pages()` → `_rebuild_index()` → `_rebuild_link_index()` → `append_log()`.
-- Limits: `wiki_max_entities_per_source=10`, `wiki_max_topics_per_source=3`, `wiki_max_related_pages_per_source=5`.
+- Limits: `wiki_max_entities_per_source=20`, `wiki_max_topics_per_source=5`, `wiki_max_related_pages_per_source=5`.
+- **LLM Response Type Safety** (added 2026-04-14): `_extract_topics()` handles cases where LLM returns lists instead of strings for `slug`, `title`, and `type` fields. Lists are converted to strings (first element for slugs/titles, comma-joined for types). Prevents "unhashable type: 'list'" errors in downstream set/dict operations.
 - Race condition guard: `asyncio.Lock` per `"{user_id}:{rel_path}"` trong `_page_locks` dict; riêng `_link_index_locks` per user cho `link_index.json`.
 - **Bidirectional link index** (`link_index.json`): sau mỗi synthesis, extract `[[slug]]` → lưu forward links. `read_wiki_page()` tool trả `backlinks` (pages khác link đến trang này), `is_stub` flag.
 - **Ghost Link stubs**: khi LLM generate `[[slug]]` cho entity chưa tồn tại → auto-create stub page (`version=0`, `stub=true`) để agent không bị confused.
@@ -115,6 +116,7 @@ HTTP Request → FastAPI Router (api/v1/) → Service Layer → Repository / ADK
 - **Context summarization config** (tunable via `.env`): `SUMMARY_THRESHOLD=22`, `SUMMARY_KEEP_RECENT=10`, `MAX_CONTEXT_MESSAGES=20`. `SCORE_THRESHOLD=0.6` loại RAG results thấp. `MEMORY_SEARCH_LIMIT=15` search rộng rồi rerank top-7.
 - **Model config** (`core/llm_config.yaml`): `model` (Root agent), `temperature/top_p/top_k/max_output_tokens`, `system_instruction` (chi tiết chiến lược gọi tools, trigger patterns). ⚠️ `gemini-2.0-flash-lite` đã deprecated — dùng `gemini-2.0-flash`.
 - **Soniox config** (local `.env`): `SONIOX_API_KEY=xxx`, `SONIOX_MODEL=stt-rt-preview` (default), `SONIOX_TARGET_LANG=vi` (default). Không cần thay đổi docker-compose — Soniox là external API.
+- **CI/CD test env vars**: Backend test job requires `GEMINI_API_KEY`, `DEBUG=true`, `JWT_SECRET_KEY`, `ALLOWED_ORIGINS` để pass Settings validation.
 
 ### Dependency Injection
 
@@ -146,6 +148,18 @@ service = RAGService(qdrant_repo=MagicMock(spec=QdrantRepository), settings=get_
 Key async mock rules:
 - `session_service.get_session` / `create_session` → `AsyncMock`
 - `runner.run_async` → `async def fake(**kwargs): yield event` (async generator)
+
+### CI/CD Pipeline
+
+**Backend** (`.github/workflows/ci-cd.yml`):
+1. **Lint** — ruff format + check
+2. **Test** — pytest with coverage (requires `GEMINI_API_KEY`, `DEBUG=true`, `JWT_SECRET_KEY`, `ALLOWED_ORIGINS`)
+3. **Build & Push** — Docker image → ECR
+4. **Deploy** — ECS rolling update (wait for stability)
+
+**Frontend** (`.github/workflows/deploy-frontend.yml`):
+1. **Build** — tsc + vite build
+2. **Deploy** — S3 sync + CloudFront invalidate
 
 ## Git Conventions
 

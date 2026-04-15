@@ -135,6 +135,7 @@ export function useTranscription({ userId }: UseTranscriptionOptions) {
             headers: {
               'Content-Type': 'application/octet-stream',
               'X-User-ID': userId,
+              'X-Requested-With': 'XMLHttpRequest',
             },
             body: chunk,
           })
