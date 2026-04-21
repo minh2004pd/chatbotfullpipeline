@@ -6,7 +6,6 @@ import pytest
 
 from app.repositories.qdrant_repo import QdrantRepository
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 

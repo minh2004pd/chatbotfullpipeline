@@ -1,6 +1,7 @@
 # Agent Architecture — MemRAG
 
 ## Tổng quan
+> Cập nhật lần cuối: 2026-04-21
 
 MemRAG dùng **single agent** với Google ADK, model `gemini-2.5-flash`:
 

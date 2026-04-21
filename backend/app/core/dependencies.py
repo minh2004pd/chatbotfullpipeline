@@ -28,12 +28,35 @@ from qdrant_client import QdrantClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.root_agent import get_root_agent
+from app.core.cache import CacheService, get_cache_service
 from app.core.config import Settings, get_settings
 from app.core.database import get_dynamodb_resource, get_mem0_client, get_qdrant_client
 from app.core.database_auth import get_db
 from app.core.security import decode_token
 from app.core.storages import StorageBackend, get_storage
 from app.models.user import User
+
+_USER_CACHE_FIELDS = (
+    "id",
+    "email",
+    "display_name",
+    "avatar_url",
+    "is_active",
+    "oauth_provider",
+    "oauth_provider_id",
+)
+
+
+def _user_to_cache(user: User) -> dict:
+    return {f: getattr(user, f, None) for f in _USER_CACHE_FIELDS}
+
+
+def _user_from_cache(data: dict) -> User:
+    u = User()
+    for field in _USER_CACHE_FIELDS:
+        if field in data:
+            setattr(u, field, data[field])
+    return u
 from app.repositories.mem0_repo import Mem0Repository
 from app.repositories.qdrant_repo import QdrantRepository
 from app.repositories.wiki_repo import WikiRepository
@@ -60,14 +83,23 @@ async def get_current_user(
     3. If no JWT and DEBUG=true → fall back to X-User-ID header (dev only)
     4. If no JWT and DEBUG=false → raise 401 (no anonymous access in production)
     """
+    cache = get_cache_service()
+
     # Try JWT cookie first
     token = request.cookies.get("access_token")
     if token:
         try:
             payload = decode_token(token)
             user_id = payload["sub"]
+
+            cache_key = f"memrag:auth:user:{user_id}"
+            cached_data = await cache.get_json(cache_key)
+            if cached_data and cached_data.get("is_active"):
+                return _user_from_cache(cached_data)
+
             user = await db.get(User, user_id)
             if user and user.is_active:
+                await cache.set_json(cache_key, _user_to_cache(user), ttl=settings.redis_user_ttl)
                 return user
         except jwt.ExpiredSignatureError:
             # Token expired — return 401 so frontend refresh interceptor kicks in
@@ -225,6 +257,7 @@ def get_session_service_dep(
 def get_wiki_repo() -> WikiRepository:
     """Singleton WikiRepository — tự chọn local hoặc S3 backend."""
     settings = get_settings()
+    cache = get_cache_service()
     if settings.storage_backend == "s3":
         import boto3
 
@@ -241,15 +274,25 @@ def get_wiki_repo() -> WikiRepository:
             s3_client=s3_client,
             s3_bucket=settings.s3_bucket,
             s3_prefix="wiki",
+            cache=cache,
+            wiki_ttl=settings.redis_wiki_ttl,
         )
     # Local filesystem
-    return WikiRepository(base_dir=settings.wiki_base_dir)
+    return WikiRepository(
+        base_dir=settings.wiki_base_dir,
+        cache=cache,
+        wiki_ttl=settings.redis_wiki_ttl,
+    )
 
 
 def get_wiki_service(
     settings: Settings = Depends(get_settings),
 ) -> WikiService:
     return WikiService(repo=get_wiki_repo(), settings=settings)
+
+
+def get_cache_service_dep() -> CacheService:
+    return get_cache_service()
 
 
 # --- Annotated shorthands (dùng trong endpoint signatures) ---
@@ -263,3 +306,4 @@ SessionServiceDep = Annotated[DynamoDBSessionService, Depends(get_session_servic
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 WikiServiceDep = Annotated[WikiService, Depends(get_wiki_service)]
 WikiRepoDep = Annotated[WikiRepository, Depends(get_wiki_repo)]
+CacheDep = Annotated[CacheService, Depends(get_cache_service_dep)]

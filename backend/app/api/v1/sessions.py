@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, HTTPException, Response, status
 
-from app.core.dependencies import SessionServiceDep, UserIDDep
+from app.core.dependencies import CacheDep, SessionServiceDep, SettingsDep, UserIDDep
 from app.schemas.session import MessageItem, SessionListItem, SessionMessages
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -14,10 +14,17 @@ APP_NAME = "memrag"
 async def list_sessions(
     user_id: UserIDDep,
     service: SessionServiceDep,
+    cache: CacheDep,
+    settings: SettingsDep,
 ) -> list[SessionListItem]:
     """Liệt kê tất cả sessions của user (sắp xếp mới nhất trước)."""
+    cache_key = f"memrag:sessions:{user_id}:list"
+    cached = await cache.get_json(cache_key)
+    if cached is not None:
+        return [SessionListItem(**item) for item in cached]
+
     items = service.list_sessions_with_metadata(app_name=APP_NAME, user_id=user_id)
-    return [
+    result = [
         SessionListItem(
             session_id=item["session_id"],
             title=item.get("title", "New Chat"),
@@ -27,6 +34,10 @@ async def list_sessions(
         )
         for item in items
     ]
+    await cache.set_json(
+        cache_key, [r.model_dump(mode="json") for r in result], ttl=settings.redis_session_list_ttl
+    )
+    return result
 
 
 @router.get("/{session_id}", response_model=SessionMessages)
@@ -51,7 +62,9 @@ async def delete_session(
     session_id: str,
     user_id: UserIDDep,
     service: SessionServiceDep,
+    cache: CacheDep,
 ) -> Response:
     """Xóa một session."""
     await service.delete_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
+    await cache.delete(f"memrag:sessions:{user_id}:list")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

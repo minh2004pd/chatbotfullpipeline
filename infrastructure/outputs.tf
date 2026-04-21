@@ -59,3 +59,9 @@ output "rds_db_name" {
   description = "RDS PostgreSQL database name"
   value       = aws_db_instance.postgres.db_name
 }
+
+# ── ElastiCache Redis ────────────────────────────────────────────────────────
+output "redis_primary_endpoint" {
+  description = "ElastiCache Redis primary endpoint address"
+  value       = aws_elasticache_replication_group.redis.primary_endpoint_address
+}

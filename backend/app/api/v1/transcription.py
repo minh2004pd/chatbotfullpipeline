@@ -80,6 +80,10 @@ async def start_transcription(
         enable_translation=req.enable_translation,
         translation_target_language=req.translation_target_language,
         enable_speaker_diarization=req.enable_speaker_diarization,
+        enable_language_identification=req.enable_language_identification,
+        enable_endpoint_detection=req.enable_endpoint_detection,
+        max_endpoint_delay_ms=req.max_endpoint_delay_ms,
+        context=req.context,
     )
 
     title = req.title or f"Meeting {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
@@ -147,6 +151,7 @@ async def stop_transcription(meeting_id: str, user_id: UserIDDep):
             user_id=user_id,
             seq=utt.get("seq", 0),
             speaker=utt.get("speaker", "speaker_0"),
+            language=utt.get("language"),
             text=utt.get("text", ""),
             translated_text=utt.get("translated_text"),
             start_ms=utt.get("start_ms"),

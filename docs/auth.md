@@ -1,6 +1,7 @@
 # Authentication System
 
 ## Overview
+> Cập nhật lần cuối: 2026-04-21
 
 MemRAG Chatbot implements a full-featured authentication system supporting:
 - **Email/Password** registration and login

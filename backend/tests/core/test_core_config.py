@@ -1,13 +1,9 @@
 """Unit tests cho app.core.config — Settings validation và validators."""
 
-import os
-from unittest.mock import patch
-
 import pytest
 from pydantic import ValidationError
 
 from app.core.config import Settings, get_settings
-
 
 # ── parse_origins validator ───────────────────────────────────────────────────
 

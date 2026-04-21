@@ -11,22 +11,24 @@ on:
     branches: [main]
     paths:
       - "backend/**"
+      - "docker-compose.yml"
       - ".github/workflows/ci-cd.yml"
 
-# ── Đổi các giá trị này cho phù hợp với AWS setup của bạn ──────────────────
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   AWS_REGION: ap-southeast-2
-  ECR_REPOSITORY: memragbackend         # tên ECR repository
-  ECS_CLUSTER: memrag-cluster           # tên ECS cluster
-  ECS_SERVICE: memrag-backend-service   # tên ECS service
-  ECS_TASK_DEFINITION: memrag-backend   # tên ECS task definition
-  CONTAINER_NAME: backend               # tên container trong task definition
-# ────────────────────────────────────────────────────────────────────────────
+  ECR_REPOSITORY: memragbackend
+  ECS_CLUSTER: memrag-cluster
+  ECS_SERVICE: memrag-backend-service
+  ECS_TASK_DEFINITION: memrag-backend
+  CONTAINER_NAME: backend
 
 jobs:
-  # ── 1. LINT ──────────────────────────────────────────────────────────────
   lint:
-    name: Lint & Format check
+    name: Lint & Format
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -40,7 +42,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --frozen
+        run: uv sync --locked
 
       - name: ruff format check
         run: uv run ruff format --check .
@@ -48,10 +50,10 @@ jobs:
       - name: ruff lint check
         run: uv run ruff check .
 
-  # ── 2. TEST ──────────────────────────────────────────────────────────────
   test:
     name: Test & Coverage
     runs-on: ubuntu-latest
+    needs: lint
     defaults:
       run:
         working-directory: backend
@@ -64,16 +66,17 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --frozen
+        run: uv sync --locked
 
       - name: Run pytest with coverage
         run: uv run pytest tests/ -v --cov=app --cov-report=term-missing --cov-report=xml
         env:
-          # Settings có defaults cho tất cả; GEMINI_API_KEY cần để Settings init
           GEMINI_API_KEY: dummy-ci-key
+          SONIOX_API_KEY: dummy-soniox-key
           DEBUG: "true"
           JWT_SECRET_KEY: ci-test-secret-key-for-ci-pipeline-only
           ALLOWED_ORIGINS: '["http://localhost:5173"]'
+          REDIS_ENABLED: "false"
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
@@ -83,12 +86,10 @@ jobs:
           path: backend/coverage.xml
           retention-days: 7
 
-  # ── 3. BUILD & PUSH TO ECR ───────────────────────────────────────────────
   build-push:
     name: Build & Push to ECR
     runs-on: ubuntu-latest
     needs: [lint, test]
-    # Chỉ chạy khi push vào main (không chạy khi PR)
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     outputs:
       image: ${{ steps.build.outputs.image }}
@@ -113,6 +114,7 @@ jobs:
           TAG: ${{ github.sha }}
         run: |
           docker build \
+            --cache-from $REGISTRY/$ECR_REPOSITORY:latest \
             -t $REGISTRY/$ECR_REPOSITORY:$TAG \
             -t $REGISTRY/$ECR_REPOSITORY:latest \
             ./backend
@@ -120,7 +122,6 @@ jobs:
           docker push $REGISTRY/$ECR_REPOSITORY:latest
           echo "image=$REGISTRY/$ECR_REPOSITORY:$TAG" >> $GITHUB_OUTPUT
 
-  # ── 4. DEPLOY TO ECS (EC2 launch type) ───────────────────────────────────
   deploy:
     name: Deploy to ECS
     runs-on: ubuntu-latest
@@ -155,5 +156,4 @@ jobs:
           task-definition: ${{ steps.task-def.outputs.task-definition }}
           service: ${{ env.ECS_SERVICE }}
           cluster: ${{ env.ECS_CLUSTER }}
-          # Đợi cho đến khi service stable (tasks mới healthy, tasks cũ drain)
           wait-for-service-stability: true

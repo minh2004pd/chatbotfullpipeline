@@ -1,8 +1,8 @@
-# 🧠 Kế hoạch tích hợp Soniox — Realtime Transcription & RAG Pipeline
-
-> Ngày tạo: 2026-04-06  
+# 🧠 Soniox Integration — Realtime Transcription & RAG Pipeline
+> Trạng thái: **Đã triển khai (Implemented)**  
+> Cập nhật lần cuối: 2026-04-21  
 > Dự án: MemRAG Chatbot (proj2)  
-> Mục tiêu: Thêm tính năng realtime transcription + translation + diarization từ nhiều nguồn audio → lưu transcript vào RAG pipeline
+> Mục tiêu: Transcription realtime + translation + diarization → lưu transcript vào RAG pipeline
 
 ---
 
@@ -172,7 +172,7 @@ AudioWorklet (16kHz PCM16)       FastAPI
 ```json
 {
   "token": "${SONIOX_API_KEY}",
-  "model": "stt-rt-preview",
+  "model": "stt-rt-v4",
   "language_hints": ["vi", "en"],
   "enable_translation": true,
   "translation_target_language": "vi",
@@ -386,7 +386,7 @@ DYNAMODB_ENDPOINT_URL=http://dynamodb-local:8000
 
 # NEW — Soniox
 SONIOX_API_KEY=xxx
-SONIOX_MODEL=stt-rt-preview
+SONIOX_MODEL=stt-rt-v4
 SONIOX_TARGET_LANG=vi
 ```
 

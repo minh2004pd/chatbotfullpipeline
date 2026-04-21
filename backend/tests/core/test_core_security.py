@@ -14,7 +14,6 @@ from app.core.security import (
     verify_password,
 )
 
-
 # ── Password hashing ──────────────────────────────────────────────────────────
 
 
@@ -252,8 +251,7 @@ class TestDecodeToken:
         expired_payload = {
             "sub": "user-123",
             "type": "access",
-            "exp": datetime.datetime.now(datetime.timezone.utc)
-            - datetime.timedelta(seconds=10),
+            "exp": datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=10),
         }
         token = jwt.encode(
             expired_payload,
@@ -291,7 +289,7 @@ class TestPasswordRoundtrip:
             "simple",
             "p@$$w0rd",
             "tiếng_việt_🔒",
-            "a" * 100,
+            "a" * 71,  # below bcrypt 72-byte limit so pwd+"x" produces different hash
             "",
             " spaces around ",
         ]
@@ -312,7 +310,7 @@ class TestToBytes:
         assert result == b"hello"
 
     def test_to_bytes_truncates_long_password(self):
-        from app.core.security import _to_bytes, _BCRYPT_MAX_BYTES
+        from app.core.security import _BCRYPT_MAX_BYTES, _to_bytes
 
         long_pwd = "a" * 200
         result = _to_bytes(long_pwd)

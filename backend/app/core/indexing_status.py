@@ -7,7 +7,7 @@ Lý do dùng in-memory thay vì DB:
 """
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 _EXPIRE_SECS = 600  # auto-expire sau 10 phút
 
@@ -15,7 +15,7 @@ _EXPIRE_SECS = 600  # auto-expire sau 10 phút
 @dataclass
 class _WikiEntry:
     status: str  # "processing" | "done" | "error"
-    created_at: float = 0.0
+    created_at: float = field(default_factory=time.monotonic)
 
 
 # {user_id: {document_id: _WikiEntry}}

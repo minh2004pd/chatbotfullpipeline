@@ -193,6 +193,12 @@ variable "soniox_ws_url" {
   default     = "wss://stt-rt.soniox.com/transcribe-websocket"
 }
 
+variable "soniox_endpoint_delay_ms" {
+  description = "Soniox endpoint detection delay in milliseconds (500-3000)"
+  type        = number
+  default     = 1000
+}
+
 variable "jwt_secret_key" {
   description = "JWT signing secret (HS256). Must be 32+ characters."
   type        = string
@@ -241,4 +247,17 @@ variable "db_username" {
   description = "Master username for RDS PostgreSQL"
   type        = string
   default     = "memrag"
+}
+
+# ── ElastiCache Redis ─────────────────────────────────────────────────────────
+variable "redis_node_type" {
+  description = "ElastiCache Redis node type"
+  type        = string
+  default     = "cache.t3.micro"
+}
+
+variable "redis_engine_version" {
+  description = "ElastiCache Redis engine version"
+  type        = string
+  default     = "7.1"
 }

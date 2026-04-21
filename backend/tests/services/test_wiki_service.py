@@ -52,6 +52,18 @@ def service(repo, settings):
     return WikiService(repo=repo, settings=settings)
 
 
+@pytest.fixture(autouse=True)
+def clear_wiki_locks():
+    """Clear module-level asyncio.Lock dicts between tests to avoid event loop binding errors."""
+    import app.services.wiki_service as ws
+
+    ws._page_locks.clear()
+    ws._link_index_locks.clear()
+    yield
+    ws._page_locks.clear()
+    ws._link_index_locks.clear()
+
+
 USER = "user_test"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -162,7 +174,10 @@ async def test_extract_topics_preserves_entity_type(service):
     mock_resp = MagicMock()
     mock_resp.text = llm_response
 
-    with _patch("app.services.wiki_service._with_retry", new=AsyncMock(return_value=mock_resp)):
+    with (
+        _patch("app.services.wiki_service.get_genai_client"),
+        _patch("app.services.wiki_service._with_retry", new=AsyncMock(return_value=mock_resp)),
+    ):
         result = await service._extract_topics(text="content", source_name="lora.pdf")
 
     entities = [t for t in result if t["category"] == "entities"]
@@ -224,7 +239,7 @@ async def test_update_wiki_from_document_creates_page(service, repo):
             full_text="Đây là spec của dự án MemRAG",
         )
 
-    page = repo.read_page(user_id=USER, rel_path="pages/topics/memrag-project.md")
+    page = repo.read_page(user_id=USER, rel_path="pages/topics/memragproject.md")
     assert page is not None
     assert "MemRAG Project" in page
 
@@ -944,7 +959,7 @@ async def test_parallel_extraction_runs_concurrently(service, repo):
 
     call_times = []
 
-    async def mock_extract(text, source_name):
+    async def mock_extract(text, source_name, wiki_context=""):
         call_times.append(time.monotonic())
         await asyncio.sleep(0.1)  # simulate LLM latency
         return [
@@ -980,7 +995,7 @@ async def test_parallel_extraction_runs_concurrently(service, repo):
     assert mock_synthesize.call_count >= 1
 
     # Verify pages được tạo (mock synthesizer trả về nội dung cố định)
-    topic_page = repo.read_page(user_id=USER, rel_path="pages/topics/topic-parallelpdf.md")
+    topic_page = repo.read_page(user_id=USER, rel_path="pages/topics/topicparallelpdf.md")
     assert topic_page is not None
     assert "Test" in topic_page  # mock synthesizer trả về "# Test"
 
@@ -993,7 +1008,7 @@ async def test_pipeline_continues_when_one_chunk_fails(service, repo):
     """Khi 1 chunk extraction lỗi, các chunk khác vẫn tiếp tục pipeline."""
     call_count = 0
 
-    async def mock_extract_fail_on_chunk_1(text, source_name):
+    async def mock_extract_fail_on_chunk_1(text, source_name, wiki_context=""):
         nonlocal call_count
         call_count += 1
         if call_count == 2:  # chunk thứ 2 fail
@@ -1030,3 +1045,318 @@ async def test_pipeline_continues_when_one_chunk_fails(service, repo):
     # Wiki vẫn có pages được tạo từ các chunk thành công
     all_pages = repo.list_all_pages(user_id=USER)
     assert len(all_pages) > 0, "Phải có ít nhất 1 page từ các chunk thành công"
+
+
+# ── _get_existing_wiki_context ────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_existing_wiki_context_empty_when_no_wiki(service):
+    """Trả về chuỗi rỗng khi wiki chưa có pages."""
+    result = await service._get_existing_wiki_context(user_id=USER)
+    assert result == ""
+
+
+@pytest.mark.asyncio
+async def test_get_existing_wiki_context_with_existing_pages(service, repo):
+    """Trả về context string chứa danh sách entities/topics đã có."""
+    repo.ensure_wiki_structure(user_id=USER)
+    repo.write_page(
+        user_id=USER,
+        rel_path="pages/entities/lora.md",
+        content="---\ntitle: LoRA\ntags: [method]\nsources: [doc-1]\nlast_updated: 2026-04-21\nversion: 1\n---\n# LoRA",
+    )
+    # Phải rebuild index để _get_existing_wiki_context đọc được
+    await service._rebuild_index(user_id=USER)
+
+    result = await service._get_existing_wiki_context(user_id=USER)
+    assert result != ""
+    assert "lora" in result
+    assert "LoRA" in result
+    assert "PHẢI reuse slug" in result or "reuse slug" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_get_existing_wiki_context_caps_at_50_items(service, repo):
+    """Số lượng items trong context bị cap ở 50."""
+    repo.ensure_wiki_structure(user_id=USER)
+    for i in range(60):
+        repo.write_page(
+            user_id=USER,
+            rel_path=f"pages/entities/entity{i:02d}.md",
+            content=f"---\ntitle: Entity {i}\ntags: []\nsources: [doc-1]\nlast_updated: 2026-04-21\nversion: 1\n---\n# Entity {i}",
+        )
+    await service._rebuild_index(user_id=USER)
+
+    result = await service._get_existing_wiki_context(user_id=USER)
+    # Không nên list quá 50 items → check bằng cách đếm dấu "- [entities]"
+    count = result.count("- [entities]")
+    assert count <= 50
+
+
+# ── _assess_summary_relevance ─────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_assess_summary_relevance_no_prompt_returns_false(service):
+    """Khi prompt chưa được config → luôn trả về should_update=False."""
+    from unittest.mock import patch as _patch
+
+    with _patch("app.services.wiki_service.get_llm_config") as mock_cfg:
+        mock_cfg.return_value.prompts.wiki_conversation_relevance_prompt = ""
+        result = await service._assess_summary_relevance(
+            summary_text="Chúng ta đã quyết định dùng LoRA",
+            wiki_context="- [entities] lora: LoRA",
+        )
+    assert result["should_update"] is False
+    assert result["matched_slugs"] == []
+
+
+@pytest.mark.asyncio
+async def test_assess_summary_relevance_returns_should_update_true(service):
+    """LLM trả về should_update=true → method trả về đúng."""
+    import json
+    from unittest.mock import patch as _patch
+
+    llm_resp = json.dumps(
+        {"should_update": True, "matched_slugs": ["lora", "peft"], "reason": "Technical facts found"}
+    )
+    mock_resp = MagicMock()
+    mock_resp.text = llm_resp
+
+    with (
+        _patch("app.services.wiki_service.get_genai_client"),
+        _patch("app.services.wiki_service._with_retry", new=AsyncMock(return_value=mock_resp)),
+    ):
+        result = await service._assess_summary_relevance(
+            summary_text="Chúng ta đã benchmark LoRA với PEFT và kết quả tốt",
+            wiki_context="- [entities] lora: LoRA\n- [topics] peft: PEFT",
+        )
+
+    assert result["should_update"] is True
+    assert "lora" in result["matched_slugs"]
+    assert "peft" in result["matched_slugs"]
+
+
+@pytest.mark.asyncio
+async def test_assess_summary_relevance_returns_should_update_false(service):
+    """LLM trả về should_update=false → không có matched slugs."""
+    import json
+    from unittest.mock import patch as _patch
+
+    llm_resp = json.dumps(
+        {"should_update": False, "matched_slugs": [], "reason": "Chitchat only"}
+    )
+    mock_resp = MagicMock()
+    mock_resp.text = llm_resp
+
+    with (
+        _patch("app.services.wiki_service.get_genai_client"),
+        _patch("app.services.wiki_service._with_retry", new=AsyncMock(return_value=mock_resp)),
+    ):
+        result = await service._assess_summary_relevance(
+            summary_text="Xin chào, bạn khỏe không?",
+            wiki_context="- [entities] lora: LoRA",
+        )
+
+    assert result["should_update"] is False
+    assert result["matched_slugs"] == []
+
+
+# ── update_wiki_from_conversation_summary ─────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_conversation_wiki_update_skip_when_disabled(repo, settings):
+    """WIKI_CONVERSATION_UPDATE_ENABLED=False → không làm gì."""
+    settings.wiki_conversation_update_enabled = False
+    svc = WikiService(repo=repo, settings=settings)
+
+    await svc.update_wiki_from_conversation_summary(
+        user_id=USER, session_id="sess-1", summary_text="Technical content about LoRA"
+    )
+    # Không có gì được tạo
+    assert repo.list_all_pages(user_id=USER) == []
+
+
+@pytest.mark.asyncio
+async def test_conversation_wiki_update_skip_empty_wiki(service, repo):
+    """Wiki chưa có pages → skip ngay (không gọi LLM)."""
+    with patch.object(service, "_assess_summary_relevance") as mock_assess:
+        await service.update_wiki_from_conversation_summary(
+            user_id=USER, session_id="sess-1", summary_text="Technical content"
+        )
+    mock_assess.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_conversation_wiki_update_skip_not_relevant(service, repo):
+    """LLM đánh giá không relevant → không update pages."""
+    repo.ensure_wiki_structure(user_id=USER)
+    repo.write_page(
+        user_id=USER,
+        rel_path="pages/entities/lora.md",
+        content="---\ntitle: LoRA\nsources: [doc-1]\nlast_updated: 2026-04-21\nversion: 1\n---\n# LoRA",
+    )
+    await service._rebuild_index(user_id=USER)
+
+    with patch.object(
+        service,
+        "_assess_summary_relevance",
+        new=AsyncMock(
+            return_value={"should_update": False, "matched_slugs": [], "reason": "Chitchat"}
+        ),
+    ):
+        await service.update_wiki_from_conversation_summary(
+            user_id=USER, session_id="sess-2", summary_text="Xin chào!"
+        )
+
+    # Page không thay đổi
+    original = repo.read_page(user_id=USER, rel_path="pages/entities/lora.md")
+    assert "version: 1" in original
+
+
+@pytest.mark.asyncio
+async def test_conversation_wiki_update_enriches_matched_pages(service, repo):
+    """Happy path: LLM relevant → page được enrich với nội dung mới."""
+    repo.ensure_wiki_structure(user_id=USER)
+    original_content = "---\ntitle: LoRA\nsources: [doc-1]\nlast_updated: 2026-04-21\nversion: 1\n---\n# LoRA\nGiới thiệu về LoRA."
+    repo.write_page(user_id=USER, rel_path="pages/entities/lora.md", content=original_content)
+    await service._rebuild_index(user_id=USER)
+
+    enriched_content = "---\ntitle: LoRA\nsources: [doc-1, conversation:sess-3]\nlast_updated: 2026-04-21\nversion: 2\n---\n# LoRA\nGiới thiệu về LoRA.\n\n## Kết quả thực nghiệm\nAcc 95% trên benchmark X."
+
+    with (
+        patch.object(
+            service,
+            "_assess_summary_relevance",
+            new=AsyncMock(
+                return_value={
+                    "should_update": True,
+                    "matched_slugs": ["lora"],
+                    "reason": "New benchmark results",
+                }
+            ),
+        ),
+        patch("app.services.wiki_service.get_genai_client"),
+        patch(
+            "app.services.wiki_service._with_retry",
+            new=AsyncMock(return_value=MagicMock(text=enriched_content)),
+        ),
+    ):
+        await service.update_wiki_from_conversation_summary(
+            user_id=USER, session_id="sess-3", summary_text="Benchmark LoRA đạt 95% accuracy"
+        )
+
+    updated = repo.read_page(user_id=USER, rel_path="pages/entities/lora.md")
+    assert updated is not None
+    assert "version: 2" in updated
+    assert "conversation:sess-3" in updated
+
+
+@pytest.mark.asyncio
+async def test_conversation_wiki_update_skip_stub_pages(service, repo):
+    """Stub pages không được update."""
+    repo.ensure_wiki_structure(user_id=USER)
+    stub_content = "---\ntitle: Stub\nsources: [doc-1]\nlast_updated: 2026-04-21\nstub: true\nversion: 0\n---\n# Stub"
+    repo.write_page(user_id=USER, rel_path="pages/entities/stub.md", content=stub_content)
+    await service._rebuild_index(user_id=USER)
+
+    with (
+        patch.object(
+            service,
+            "_assess_summary_relevance",
+            new=AsyncMock(
+                return_value={"should_update": True, "matched_slugs": ["stub"], "reason": "match"}
+            ),
+        ),
+        patch("app.services.wiki_service.get_genai_client"),
+        patch("app.services.wiki_service._with_retry", new=AsyncMock()),
+    ):
+        await service.update_wiki_from_conversation_summary(
+            user_id=USER, session_id="sess-4", summary_text="About stub"
+        )
+
+    # Stub page vẫn giữ nguyên (không bị _with_retry gọi)
+    page = repo.read_page(user_id=USER, rel_path="pages/entities/stub.md")
+    assert "stub: true" in page
+
+
+# ── context-aware extraction ──────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_extract_topics_receives_wiki_context(service):
+    """_extract_topics phải nhận wiki_context và đưa vào prompt."""
+    import json
+    from unittest.mock import patch as _patch
+
+    captured_prompts: list[str] = []
+
+    async def mock_with_retry(call_fn):
+        # capture prompt bằng cách inspect closure
+        import inspect
+
+        src = inspect.getclosurevars(call_fn)
+        prompt = src.nonlocals.get("prompt", "")
+        captured_prompts.append(prompt)
+        mock_resp = MagicMock()
+        mock_resp.text = json.dumps(
+            {
+                "entities": [{"slug": "lora", "title": "LoRA", "type": "method"}],
+                "topics": [{"slug": "peft", "title": "PEFT"}],
+                "summary": {"slug": "test", "title": "Tóm tắt: test"},
+            }
+        )
+        return mock_resp
+
+    with (
+        _patch("app.services.wiki_service.get_genai_client"),
+        _patch("app.services.wiki_service._with_retry", new=mock_with_retry),
+    ):
+        await service._extract_topics(
+            text="Nội dung về LoRA",
+            source_name="test.pdf",
+            wiki_context="## Existing:\n  - [entities] lora: LoRA",
+        )
+
+    assert len(captured_prompts) == 1
+    assert "## Existing:" in captured_prompts[0]
+    assert "lora" in captured_prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_process_source_injects_wiki_context_into_extraction(service, repo):
+    """_process_source phải gọi _get_existing_wiki_context rồi truyền vào _extract_topics."""
+    # Setup: tạo page sẵn trong wiki
+    repo.ensure_wiki_structure(user_id=USER)
+    repo.write_page(
+        user_id=USER,
+        rel_path="pages/entities/lora.md",
+        content="---\ntitle: LoRA\nsources: [doc-prev]\nlast_updated: 2026-04-21\nversion: 1\n---\n# LoRA",
+    )
+    await service._rebuild_index(user_id=USER)
+
+    received_contexts: list[str] = []
+
+    async def capture_extract(text, source_name, wiki_context=""):
+        received_contexts.append(wiki_context)
+        return [
+            {"slug": "lora", "category": "entities", "title": "LoRA", "type": "method"},
+            {"slug": "peft", "category": "topics", "title": "PEFT"},
+            {"slug": "lora", "category": "summaries", "title": "Tóm tắt: doc.pdf"},
+        ]
+
+    with (
+        patch.object(service, "_extract_topics", new=capture_extract),
+        patch.object(service, "_synthesize_page", new=AsyncMock(return_value="")),
+    ):
+        await service.update_wiki_from_document(
+            user_id=USER, document_id="doc-new", filename="new.pdf", full_text="Content about LoRA"
+        )
+
+    # wiki_context phải chứa thông tin về entity "lora" đã có
+    assert len(received_contexts) > 0
+    assert any("lora" in ctx for ctx in received_contexts), (
+        "wiki_context phải chứa slug 'lora' từ wiki hiện có"
+    )

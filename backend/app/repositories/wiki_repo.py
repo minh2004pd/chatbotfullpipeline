@@ -16,11 +16,17 @@ Cấu trúc thư mục:
   └── wiki_schema.md     # schema/hiến pháp của wiki (tầng 3)
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import structlog
+
+if TYPE_CHECKING:
+    from app.core.cache import CacheService
 
 logger = structlog.get_logger(__name__)
 
@@ -41,11 +47,15 @@ class WikiRepository:
         s3_client=None,
         s3_bucket: str = "",
         s3_prefix: str = "wiki",
+        cache: CacheService | None = None,
+        wiki_ttl: int = 600,
     ) -> None:
         self._base_dir = base_dir
         self._s3 = s3_client
         self._s3_bucket = s3_bucket
         self._s3_prefix = s3_prefix.rstrip("/")
+        self._cache = cache
+        self._wiki_ttl = wiki_ttl
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
@@ -125,7 +135,15 @@ class WikiRepository:
         return self._read(user_id, rel_path)
 
     async def aread_page(self, *, user_id: str, rel_path: str) -> str | None:
-        return await _to_thread(self.read_page, user_id=user_id, rel_path=rel_path)
+        cache_key = f"memrag:wiki:{user_id}:page:{rel_path}"
+        if self._cache:
+            cached = await self._cache.get(cache_key)
+            if cached is not None:
+                return cached
+        result = await _to_thread(self.read_page, user_id=user_id, rel_path=rel_path)
+        if self._cache and result is not None:
+            await self._cache.set(cache_key, result, ttl=self._wiki_ttl)
+        return result
 
     def write_page(self, *, user_id: str, rel_path: str, content: str) -> None:
         """Ghi nội dung trang Wiki (overwrite)."""
@@ -134,6 +152,12 @@ class WikiRepository:
 
     async def awrite_page(self, *, user_id: str, rel_path: str, content: str) -> None:
         await _to_thread(self.write_page, user_id=user_id, rel_path=rel_path, content=content)
+        if self._cache:
+            await self._cache.delete(
+                f"memrag:wiki:{user_id}:page:{rel_path}",
+                f"memrag:wiki:{user_id}:index",
+            )
+            await self._cache.delete_pattern(f"memrag:wiki:{user_id}:graph:*")
 
     def delete_page(self, *, user_id: str, rel_path: str) -> None:
         """Xóa trang Wiki."""
@@ -142,6 +166,12 @@ class WikiRepository:
 
     async def adelete_page(self, *, user_id: str, rel_path: str) -> None:
         await _to_thread(self.delete_page, user_id=user_id, rel_path=rel_path)
+        if self._cache:
+            await self._cache.delete(
+                f"memrag:wiki:{user_id}:page:{rel_path}",
+                f"memrag:wiki:{user_id}:index",
+            )
+            await self._cache.delete_pattern(f"memrag:wiki:{user_id}:graph:*")
 
     def list_pages_in_category(self, *, user_id: str, category: str) -> list[str]:
         """
@@ -179,14 +209,30 @@ class WikiRepository:
         return self._read(user_id, "wiki_schema.md") or ""
 
     async def aread_schema(self, *, user_id: str) -> str:
-        return await _to_thread(self.read_schema, user_id=user_id)
+        cache_key = f"memrag:wiki:{user_id}:schema"
+        if self._cache:
+            cached = await self._cache.get(cache_key)
+            if cached is not None:
+                return cached
+        result = await _to_thread(self.read_schema, user_id=user_id)
+        if self._cache:
+            await self._cache.set(cache_key, result, ttl=self._wiki_ttl * 3)
+        return result
 
     def read_index(self, *, user_id: str) -> str:
         """Đọc index.md — trả về "" nếu chưa có."""
         return self._read(user_id, "index.md") or ""
 
     async def aread_index(self, *, user_id: str) -> str:
-        return await _to_thread(self.read_index, user_id=user_id)
+        cache_key = f"memrag:wiki:{user_id}:index"
+        if self._cache:
+            cached = await self._cache.get(cache_key)
+            if cached is not None:
+                return cached
+        result = await _to_thread(self.read_index, user_id=user_id)
+        if self._cache:
+            await self._cache.set(cache_key, result, ttl=self._wiki_ttl)
+        return result
 
     def write_index(self, *, user_id: str, content: str) -> None:
         """Ghi index.md."""
@@ -194,6 +240,9 @@ class WikiRepository:
 
     async def awrite_index(self, *, user_id: str, content: str) -> None:
         await _to_thread(self.write_index, user_id=user_id, content=content)
+        if self._cache:
+            await self._cache.delete(f"memrag:wiki:{user_id}:index")
+            await self._cache.delete_pattern(f"memrag:wiki:{user_id}:graph:*")
 
     def append_log(self, *, user_id: str, entry: str) -> None:
         """Append một dòng vào log.md. Tự động rotate khi quá _LOG_MAX_LINES."""
@@ -222,7 +271,15 @@ class WikiRepository:
             return {}
 
     async def aread_link_index(self, *, user_id: str) -> dict[str, list[str]]:
-        return await _to_thread(self.read_link_index, user_id=user_id)
+        cache_key = f"memrag:wiki:{user_id}:link_index"
+        if self._cache:
+            cached = await self._cache.get_json(cache_key)
+            if cached is not None:
+                return cached  # type: ignore[return-value]
+        result = await _to_thread(self.read_link_index, user_id=user_id)
+        if self._cache:
+            await self._cache.set_json(cache_key, result, ttl=self._wiki_ttl)
+        return result
 
     def write_link_index(self, *, user_id: str, data: dict[str, list[str]]) -> None:
         """Ghi toàn bộ forward link index (overwrite)."""
@@ -230,6 +287,9 @@ class WikiRepository:
 
     async def awrite_link_index(self, *, user_id: str, data: dict[str, list[str]]) -> None:
         await _to_thread(self.write_link_index, user_id=user_id, data=data)
+        if self._cache:
+            await self._cache.delete(f"memrag:wiki:{user_id}:link_index")
+            await self._cache.delete_pattern(f"memrag:wiki:{user_id}:graph:*")
 
     # ── Raw sources ───────────────────────────────────────────────────────────
 

@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     soniox_model: str = "stt-rt-v4"
     soniox_target_lang: str = "vi"
     soniox_ws_url: str = "wss://stt-rt.soniox.com/transcribe-websocket"
+    soniox_endpoint_delay_ms: int = 1000
 
     # Meetings (DynamoDB table + Qdrant collection)
     meetings_table_name: str = "memrag-meetings"
@@ -77,6 +78,18 @@ class Settings(BaseSettings):
     wiki_max_parallel_extractions: int = 5  # concurrent _extract_topics calls
     wiki_max_parallel_synthesis: int = 5  # concurrent _synthesize_page calls
     wiki_synthesis_max_text_per_page: int = 32768  # max merged text per page (2x chunk_size)
+    wiki_conversation_update_enabled: bool = True  # feed conversation summaries vào wiki
+    wiki_conversation_max_pages_per_update: int = 5  # max pages update per conversation summary
+
+    # Redis cache
+    redis_url: str = "redis://localhost:6379/0"
+    redis_enabled: bool = True
+    redis_default_ttl: int = 300   # 5 phút default
+    redis_wiki_ttl: int = 600      # 10 phút cho wiki pages
+    redis_user_ttl: int = 300      # 5 phút cho auth user lookup
+    redis_graph_ttl: int = 120     # 2 phút cho wiki graph (expensive)
+    redis_session_list_ttl: int = 60   # 1 phút cho session list
+    redis_docs_list_ttl: int = 60      # 1 phút cho document list
 
     # PostgreSQL (auth)
     database_url: str = "postgresql+asyncpg://memrag:memrag@localhost:5432/memrag"

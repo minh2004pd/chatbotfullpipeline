@@ -7,7 +7,9 @@ from pydantic import BaseModel, Field
 
 class TranscriptionToken(BaseModel):
     text: str
-    speaker: int | None = None
+    speaker: str | None = None
+    language: str | None = None
+    translation_status: str | None = None
     start_ms: int | None = None
     end_ms: int | None = None
 
@@ -18,7 +20,6 @@ class TranscriptionEvent(BaseModel):
     type: str  # "partial" | "final" | "error" | "end"
     meeting_id: str
     tokens: list[TranscriptionToken] = []
-    translation: str | None = None
 
 
 class StartTranscriptionRequest(BaseModel):
@@ -27,6 +28,10 @@ class StartTranscriptionRequest(BaseModel):
     enable_translation: bool = True
     translation_target_language: str = "vi"
     enable_speaker_diarization: bool = True
+    enable_language_identification: bool = False
+    enable_endpoint_detection: bool = True
+    max_endpoint_delay_ms: int | None = None
+    context: dict | None = None
 
 
 class StartTranscriptionResponse(BaseModel):

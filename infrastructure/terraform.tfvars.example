@@ -1,18 +1,41 @@
 # Copy file này thành terraform.tfvars và điền giá trị thật
-# terraform.tfvars được gitignore — không commit lên GitHub
+# terraform.tfvars được gitignore — KHÔNG commit lên GitHub
 
 aws_region   = "ap-southeast-2"
 project_name = "memrag"
 
-# EC2
+# ── EC2 ──────────────────────────────────────────────────────────────────────
 instance_type    = "t3.medium"
 key_pair_name    = "your-key-pair-name"  # Tên key pair trên AWS Console
 allowed_ssh_cidr = "YOUR_IP/32"          # Thay bằng IP của bạn
 
-# App
+# ── App ───────────────────────────────────────────────────────────────────────
 gemini_api_key  = "AIzaSy..."
 qdrant_url      = "http://localhost:6333"
-allowed_origins = "[\"http://localhost:5173\"]"
+allowed_origins = "[\"https://your-cloudfront-domain.cloudfront.net\"]"
 
-# Soniox (voice transcription)
-soniox_api_key = "your-soniox-api-key"
+# ── Auth ──────────────────────────────────────────────────────────────────────
+# Tạo bằng: python -c "import secrets; print(secrets.token_hex(32))"
+jwt_secret_key = "your-random-32-plus-char-secret-here"
+
+# ── S3 Storage ────────────────────────────────────────────────────────────────
+s3_bucket            = "your-s3-bucket-name"
+s3_region            = "ap-southeast-2"
+s3_access_key_id     = "AKIAxxxxxxxxxxxxxxxxx"
+s3_secret_access_key = "your-s3-secret-access-key"
+
+# ── Soniox (voice transcription) ──────────────────────────────────────────────
+soniox_api_key           = "your-soniox-api-key"
+soniox_endpoint_delay_ms = 1000
+
+# ── ElastiCache Redis ─────────────────────────────────────────────────────────
+redis_node_type      = "cache.t3.micro"
+redis_engine_version = "7.1"
+
+# ── RDS PostgreSQL ────────────────────────────────────────────────────────────
+# db_password KHÔNG cần set — tự động generate bởi random_password trong rds.tf
+# Sau terraform apply, xem bằng: terraform output -raw db_password (nếu có output)
+# hoặc: aws ssm get-parameter --name /memrag/DB_PASSWORD --with-decryption
+db_instance_class    = "db.t3.micro"
+db_allocated_storage = 20
+db_username          = "memrag"

@@ -1,8 +1,12 @@
 """Wiki REST API — expose wiki graph và page content cho frontend."""
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Query
 
-from app.core.dependencies import UserIDDep, WikiRepoDep
+from app.core.cache import CacheService
+from app.core.dependencies import CacheDep, SettingsDep, UserIDDep, WikiRepoDep
+from app.repositories.wiki_repo import WikiRepository
 from app.schemas.wiki import WikiGraphEdge, WikiGraphNode, WikiGraphResponse, WikiPageResponse
 from app.utils.wiki_utils import (
     parse_frontmatter,
@@ -14,33 +18,24 @@ from app.utils.wiki_utils import (
 router = APIRouter(prefix="/wiki", tags=["wiki"])
 
 
-@router.get("/graph", response_model=WikiGraphResponse)
-def get_wiki_graph(
-    user_id: UserIDDep,
-    wiki_repo: WikiRepoDep,
-    show_stubs: bool = False,
-    show_summaries: bool = False,
-    source_ids: list[str] = Query(default=[]),
+def _build_graph(
+    wiki_repo: WikiRepository,
+    user_id: str,
+    show_stubs: bool,
+    show_summaries: bool,
+    filter_sources: set[str],
 ) -> WikiGraphResponse:
-    """Trả về nodes + edges cho React Flow graph.
-
-    Params:
-    - show_stubs: hiện stub pages (version=0)
-    - show_summaries: hiện summary pages (1 per source)
-    - source_ids: lọc chỉ pages có ít nhất 1 source khớp ([] = tất cả)
-    """
+    """Sync computation — chạy trong thread pool để không block event loop."""
     all_pages = wiki_repo.list_all_pages(user_id=user_id)
     link_index = wiki_repo.read_link_index(user_id=user_id)
-    filter_sources = set(source_ids)
 
-    # Đếm backlinks: target rel_path → count (dùng rel_path để chính xác hơn slug)
     backlink_counts: dict[str, int] = {}
     for targets in link_index.values():
         for target_rel in targets:
             backlink_counts[target_rel] = backlink_counts.get(target_rel, 0) + 1
 
     nodes: list[WikiGraphNode] = []
-    valid_keys: set[str] = set()  # key = "{category}/{slug}"
+    valid_keys: set[str] = set()
 
     for page_info in all_pages:
         rel_path = page_info["rel_path"]
@@ -71,7 +66,7 @@ def get_wiki_graph(
         if category == "entities":
             node_type = fm.get("type", "") or "entity"
         else:
-            node_type = category.rstrip("s")  # "topics"→"topic", "summaries"→"summary"
+            node_type = category.rstrip("s")
 
         nodes.append(
             WikiGraphNode(
@@ -87,10 +82,7 @@ def get_wiki_graph(
         )
         valid_keys.add(node_key)
 
-    # Edges — link_index dùng rel_path, map sang node key
-    # rel_path "pages/entities/lora.md" → key "entities/lora"
     def rel_to_key(rel_path: str) -> str:
-        # "pages/entities/lora.md" → "entities/lora"
         parts = rel_path.split("/")
         if len(parts) >= 3:
             return f"{parts[1]}/{parts[2].replace('.md', '')}"
@@ -117,6 +109,39 @@ def get_wiki_graph(
             )
 
     return WikiGraphResponse(nodes=nodes, edges=edges)
+
+
+@router.get("/graph", response_model=WikiGraphResponse)
+async def get_wiki_graph(
+    user_id: UserIDDep,
+    wiki_repo: WikiRepoDep,
+    cache: CacheDep,
+    settings: SettingsDep,
+    show_stubs: bool = False,
+    show_summaries: bool = False,
+    source_ids: list[str] = Query(default=[]),
+) -> WikiGraphResponse:
+    """Trả về nodes + edges cho React Flow graph.
+
+    Params:
+    - show_stubs: hiện stub pages (version=0)
+    - show_summaries: hiện summary pages (1 per source)
+    - source_ids: lọc chỉ pages có ít nhất 1 source khớp ([] = tất cả)
+    """
+    params_hash = CacheService.stable_hash(
+        {"stubs": show_stubs, "summaries": show_summaries, "sources": sorted(source_ids)}
+    )
+    cache_key = f"memrag:wiki:{user_id}:graph:{params_hash}"
+
+    cached = await cache.get_json(cache_key)
+    if cached is not None:
+        return WikiGraphResponse(**cached)
+
+    result = await asyncio.to_thread(
+        _build_graph, wiki_repo, user_id, show_stubs, show_summaries, set(source_ids)
+    )
+    await cache.set_json(cache_key, result.model_dump(), ttl=settings.redis_graph_ttl)
+    return result
 
 
 @router.get("/pages/{category}/{slug}", response_model=WikiPageResponse)

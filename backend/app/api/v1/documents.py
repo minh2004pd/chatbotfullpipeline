@@ -4,7 +4,13 @@ import asyncio
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
-from app.core.dependencies import DocumentServiceDep, SettingsDep, UserIDDep, WikiServiceDep
+from app.core.dependencies import (
+    CacheDep,
+    DocumentServiceDep,
+    SettingsDep,
+    UserIDDep,
+    WikiServiceDep,
+)
 from app.core.indexing_status import get_wiki_status, set_wiki_status
 from app.schemas.document import (
     DocumentDeleteResponse,
@@ -28,6 +34,7 @@ async def upload_document(
     service: DocumentServiceDep = None,
     settings: SettingsDep = None,
     wiki_service: WikiServiceDep = None,
+    cache: CacheDep = None,
 ) -> DocumentUploadResponse:
     """Upload PDF để ingest vào RAG."""
     if not file.filename or not file.filename.lower().endswith(".pdf"):
@@ -43,7 +50,10 @@ async def upload_document(
             detail=f"File quá lớn. Tối đa {settings.max_upload_size_mb}MB.",
         )
 
-    result = await asyncio.to_thread(service.upload_pdf, file_bytes=file_bytes, filename=file.filename, user_id=user_id)
+    result = await asyncio.to_thread(
+        service.upload_pdf, file_bytes=file_bytes, filename=file.filename, user_id=user_id
+    )
+    await cache.delete(f"memrag:docs:{user_id}:list")
 
     # Fire-and-forget: tổng hợp wiki từ tài liệu vừa upload (background, không block response)
     if settings.wiki_enabled:
@@ -85,10 +95,21 @@ async def get_indexing_status(
 async def list_documents(
     user_id: UserIDDep,
     service: DocumentServiceDep,
+    cache: CacheDep,
+    settings: SettingsDep,
 ) -> DocumentListResponse:
     """Lấy danh sách tài liệu đã upload của user."""
+    cache_key = f"memrag:docs:{user_id}:list"
+    cached = await cache.get_json(cache_key)
+    if cached is not None:
+        return DocumentListResponse(**cached)
+
     documents = await asyncio.to_thread(service.list_documents, user_id=user_id)
-    return DocumentListResponse(documents=documents, total=len(documents))
+    result = DocumentListResponse(documents=documents, total=len(documents))
+    await cache.set_json(
+        cache_key, result.model_dump(mode="json"), ttl=settings.redis_docs_list_ttl
+    )
+    return result
 
 
 @router.delete("/{document_id}", response_model=DocumentDeleteResponse)
@@ -98,11 +119,12 @@ async def delete_document(
     service: DocumentServiceDep,
     settings: SettingsDep,
     wiki_service: WikiServiceDep,
+    cache: CacheDep,
 ) -> DocumentDeleteResponse:
     """Xóa tài liệu và tất cả chunks trong Qdrant."""
     await asyncio.to_thread(service.delete_document, document_id=document_id)
+    await cache.delete(f"memrag:docs:{user_id}:list")
 
-    # Fire-and-forget: dọn dẹp wiki pages liên quan đến tài liệu bị xóa
     if settings.wiki_enabled:
         asyncio.create_task(
             wiki_service.remove_source_from_wiki(

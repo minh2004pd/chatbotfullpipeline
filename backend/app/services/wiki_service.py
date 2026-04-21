@@ -100,7 +100,9 @@ class WikiService:
             set_wiki_status(user_id, document_id, "done")
         except Exception as e:
             set_wiki_status(user_id, document_id, "error")
-            logger.error("wiki_update_document_failed", document_id=document_id, error=str(e), exc_info=True)
+            logger.error(
+                "wiki_update_document_failed", document_id=document_id, error=str(e), exc_info=True
+            )
 
     async def update_wiki_from_transcript(
         self,
@@ -131,6 +133,144 @@ class WikiService:
             )
         except Exception as e:
             logger.error("wiki_update_transcript_failed", meeting_id=meeting_id, error=str(e))
+
+    async def update_wiki_from_conversation_summary(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        summary_text: str,
+    ) -> None:
+        """Cập nhật wiki có chọn lọc từ conversation summary (trigger bởi context_filter_plugin).
+
+        Chỉ enrich pages đã tồn tại — KHÔNG tạo page mới từ conversation.
+        """
+        if not self._settings.wiki_enabled:
+            return
+        if not getattr(self._settings, "wiki_conversation_update_enabled", True):
+            return
+        if not summary_text.strip():
+            return
+        try:
+            wiki_context = await self._get_existing_wiki_context(user_id=user_id)
+            if not wiki_context:
+                logger.info(
+                    "wiki_conversation_skip_no_wiki", user_id=user_id, session_id=session_id
+                )
+                return
+
+            assessment = await self._assess_summary_relevance(
+                summary_text=summary_text, wiki_context=wiki_context
+            )
+            if not assessment.get("should_update"):
+                logger.info(
+                    "wiki_conversation_skip_not_relevant",
+                    user_id=user_id,
+                    reason=assessment.get("reason"),
+                )
+                return
+
+            matched_slugs: list[str] = assessment.get("matched_slugs", [])
+            max_pages = getattr(self._settings, "wiki_conversation_max_pages_per_update", 5)
+            matched_slugs = matched_slugs[:max_pages]
+
+            all_pages = await self._repo.alist_all_pages(user_id=user_id)
+            slug_to_page = {p["filename"].replace(".md", ""): p for p in all_pages}
+            pages_to_update = [slug_to_page[s] for s in matched_slugs if s in slug_to_page]
+
+            if not pages_to_update:
+                logger.info(
+                    "wiki_conversation_no_pages_matched",
+                    user_id=user_id,
+                    matched_slugs=matched_slugs,
+                )
+                return
+
+            logger.info(
+                "wiki_conversation_update_start",
+                user_id=user_id,
+                session_id=session_id,
+                pages=len(pages_to_update),
+            )
+
+            config = get_llm_config()
+            synthesis_prompt_template = config.prompts.wiki_conversation_synthesis_prompt
+            if not synthesis_prompt_template:
+                return
+
+            source_id = f"conversation:{session_id}"
+            semaphore = asyncio.Semaphore(self._settings.wiki_max_parallel_synthesis)
+            updated: list[str] = []
+
+            async def _update_page(page_info: dict) -> None:
+                rel_path = page_info["rel_path"]
+                async with semaphore:
+                    async with _get_page_lock(user_id, rel_path):
+                        existing = (
+                            await self._repo.aread_page(user_id=user_id, rel_path=rel_path) or ""
+                        )
+                        if not existing or _is_stub(existing):
+                            return
+                        title = _parse_frontmatter_title(existing) or page_info["filename"].replace(
+                            ".md", ""
+                        )
+                        prompt = synthesis_prompt_template.format(
+                            existing_content=existing[
+                                : self._settings.wiki_synthesis_max_text_per_page
+                            ],
+                            new_info=summary_text,
+                            topic_title=title,
+                            source_id=source_id,
+                        )
+                        inner_client = get_genai_client()
+                        inner_config = get_llm_config()
+
+                        async def _call():
+                            return await inner_client.aio.models.generate_content(
+                                model=inner_config.llm.summary_model,
+                                contents=prompt,
+                            )
+
+                        response = await _with_retry(_call)
+                        new_content = _strip_code_fence(response.text or "")
+                        if new_content and "---" in new_content and new_content != existing:
+                            await self._repo.awrite_page(
+                                user_id=user_id, rel_path=rel_path, content=new_content
+                            )
+                            updated.append(rel_path)
+                            logger.info(
+                                "wiki_conversation_page_updated",
+                                user_id=user_id,
+                                rel_path=rel_path,
+                            )
+
+            await asyncio.gather(
+                *[_update_page(p) for p in pages_to_update], return_exceptions=True
+            )
+
+            if updated:
+                await self._rebuild_index(user_id=user_id)
+                await self._repo.aappend_log(
+                    user_id=user_id,
+                    entry=(
+                        f"## [{_now_iso()}] CONVERSATION | session:{session_id} | "
+                        f"updated={len(updated)} pages: {', '.join(updated)}"
+                    ),
+                )
+
+            logger.info(
+                "wiki_conversation_update_done",
+                user_id=user_id,
+                session_id=session_id,
+                updated=len(updated),
+            )
+        except Exception as exc:
+            logger.warning(
+                "wiki_conversation_update_failed",
+                user_id=user_id,
+                session_id=session_id,
+                error=str(exc),
+            )
 
     async def normalize_page_filenames(self, *, user_id: str) -> dict[str, int]:
         """Migration: rename/merge các page files có slug không chuẩn về [a-z0-9].
@@ -301,11 +441,15 @@ class WikiService:
         chunks = _split_text_for_extraction(raw_text, self._settings.wiki_chunk_size)
 
         # ── Phase 1: MAP — Parallel Extraction ────────────────────────────────
+        # Đọc wiki context 1 lần trước khi extract để inject vào tất cả chunks
+        wiki_context = await self._get_existing_wiki_context(user_id=user_id)
         semaphore_extract = asyncio.Semaphore(self._settings.wiki_max_parallel_extractions)
 
         async def _extract_chunk(idx: int, text: str) -> _ChunkExtraction:
             async with semaphore_extract:
-                items = await self._extract_topics(text=text, source_name=source_name)
+                items = await self._extract_topics(
+                    text=text, source_name=source_name, wiki_context=wiki_context
+                )
                 return _ChunkExtraction(chunk_index=idx, items=items, chunk_text=text)
 
         # return_exceptions=True: nếu 1 chunk lỗi, các chunk khác vẫn tiếp tục
@@ -543,9 +687,41 @@ class WikiService:
             related_updated=related_updated,
         )
 
+    # ── Context helpers ───────────────────────────────────────────────────────
+
+    async def _get_existing_wiki_context(self, user_id: str) -> str:
+        """Đọc index.md và trả về danh sách entities/topics đã có để inject vào extraction prompt.
+
+        Giúp LLM ưu tiên reuse slug đã tồn tại thay vì tạo mới trùng lặp.
+        Trả về chuỗi rỗng nếu wiki chưa có page nào.
+        """
+        index_content = await self._repo.aread_index(user_id=user_id)
+        if not index_content:
+            return ""
+
+        existing_items: list[str] = []
+        for line in index_content.splitlines():
+            match = re.search(r"\[\[pages/(\w+)/(\w+)\.md\]\] — \*\*(.+?)\*\*", line)
+            if match:
+                category, slug, title = match.groups()
+                existing_items.append(f"  - [{category}] {slug}: {title}")
+
+        if not existing_items:
+            return ""
+
+        lines = ["\n\n## Entities & Topics đã có trong Wiki (PHẢI reuse slug nếu liên quan):"]
+        lines.extend(existing_items[:50])  # cap 50 để tránh bloat context
+        lines.append(
+            "\nQuy tắc: nếu nội dung mới liên quan đến entity/topic đã có → dùng ĐÚNG slug trên. "
+            "Chỉ tạo slug MỚI khi thực sự là entity/topic CHƯA TỪNG có trong danh sách trên."
+        )
+        return "\n".join(lines)
+
     # ── LLM calls ─────────────────────────────────────────────────────────────
 
-    async def _extract_topics(self, text: str, source_name: str) -> list[dict]:
+    async def _extract_topics(
+        self, text: str, source_name: str, wiki_context: str = ""
+    ) -> list[dict]:
         """Gọi LLM để extract entities + topics + summary. Fallback về summary từ source_name."""
         config = get_llm_config()
         client = get_genai_client()
@@ -559,6 +735,7 @@ class WikiService:
             max_topics=self._settings.wiki_max_topics_per_source,
             source_name=source_name,
             text=text,
+            wiki_context=wiki_context,
         )
 
         try:
@@ -666,6 +843,47 @@ class WikiService:
             },
             {"slug": base_slug, "category": "summaries", "title": f"Tóm tắt: {source_name}"},
         ]
+
+    async def _assess_summary_relevance(self, summary_text: str, wiki_context: str) -> dict:
+        """Gọi LLM để đánh giá conversation summary có đáng update wiki không.
+
+        Returns:
+            {"should_update": bool, "matched_slugs": [...], "reason": "..."}
+        """
+        config = get_llm_config()
+        prompt_template = config.prompts.wiki_conversation_relevance_prompt
+        if not prompt_template:
+            return {"should_update": False, "matched_slugs": [], "reason": "no prompt configured"}
+
+        prompt = prompt_template.format(
+            wiki_context=wiki_context,
+            summary_text=summary_text,
+        )
+        client = get_genai_client()
+
+        try:
+
+            async def _call():
+                return await client.aio.models.generate_content(
+                    model=config.llm.summary_model,
+                    contents=prompt,
+                )
+
+            response = await _with_retry(_call)
+            raw = (response.text or "").strip()
+            match = re.search(r"\{.*\}", raw, re.DOTALL)
+            if match:
+                parsed = json.loads(match.group())
+                if isinstance(parsed, dict):
+                    return {
+                        "should_update": bool(parsed.get("should_update", False)),
+                        "matched_slugs": [str(s) for s in parsed.get("matched_slugs", [])],
+                        "reason": str(parsed.get("reason", "")),
+                    }
+        except Exception as exc:
+            logger.warning("wiki_assess_relevance_failed", error=str(exc))
+
+        return {"should_update": False, "matched_slugs": [], "reason": "assessment_failed"}
 
     async def _synthesize_page(
         self,

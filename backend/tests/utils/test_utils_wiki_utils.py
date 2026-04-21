@@ -1,14 +1,11 @@
 """Unit tests cho app.utils.wiki_utils — Wiki parsing utilities."""
 
-import pytest
-
 from app.utils.wiki_utils import (
     parse_frontmatter,
     parse_sources_count,
     parse_sources_list,
     slug_from_rel_path,
 )
-
 
 # ── parse_frontmatter ─────────────────────────────────────────────────────────
 

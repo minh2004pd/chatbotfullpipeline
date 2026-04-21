@@ -11,7 +11,6 @@ from app.repositories.meeting_repo import (
     _to_decimal,
 )
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 

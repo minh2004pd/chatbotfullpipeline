@@ -108,6 +108,7 @@ async def _apply_summarization(
                 callback_context.state["summary_covered_count"] = n - keep_recent
                 existing_summary = new_summary
                 logger.info("summary_generated_blocking", covered=n - keep_recent)
+                _schedule_wiki_update_from_summary(callback_context, new_summary)
             except Exception as exc:
                 logger.warning("summarization_failed", error=str(exc))
                 llm_request.contents = contents[-settings.max_context_messages :]
@@ -149,10 +150,39 @@ def _schedule_background_summary(
             callback_context.state["conversation_summary"] = new_summary
             callback_context.state["summary_covered_count"] = n - keep_recent
             logger.info("summary_generated_background", covered=n - keep_recent)
+            await _update_wiki_from_summary_safe(callback_context, new_summary)
         except Exception as exc:
             logger.warning("background_summary_failed", error=str(exc))
 
     asyncio.ensure_future(_run())
+
+
+async def _update_wiki_from_summary_safe(
+    callback_context: CallbackContext, summary_text: str
+) -> None:
+    """Gọi wiki update từ conversation summary — bắt mọi exception để không ảnh hưởng chat flow."""
+    try:
+        user_id = str(callback_context.state.get("user_id", ""))
+        session_id = str(callback_context.state.get("session_id", ""))
+        if not user_id:
+            return
+        from app.core.dependencies import get_wiki_service  # lazy import tránh circular
+
+        wiki_svc = get_wiki_service()
+        await wiki_svc.update_wiki_from_conversation_summary(
+            user_id=user_id,
+            session_id=session_id,
+            summary_text=summary_text,
+        )
+    except Exception as exc:
+        logger.warning("wiki_conversation_update_failed", error=str(exc))
+
+
+def _schedule_wiki_update_from_summary(
+    callback_context: CallbackContext, summary_text: str
+) -> None:
+    """Fire-and-forget: schedule wiki update từ conversation summary (dùng trong blocking path)."""
+    asyncio.ensure_future(_update_wiki_from_summary_safe(callback_context, summary_text))
 
 
 async def _generate_summary(contents: list, existing_summary: str) -> str:

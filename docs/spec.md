@@ -1,7 +1,7 @@
 # MemRAG Chatbot — Spec hiện tại
 
 > Tài liệu này mô tả **trạng thái thực tế** của hệ thống (không phải spec thiết kế ban đầu).
-> Cập nhật lần cuối: 2026-04-09
+> Cập nhật lần cuối: 2026-04-21
 
 ---
 
@@ -14,7 +14,7 @@
 - Long-term memory & personalization qua mem0
 - Session persistence qua DynamoDB (sidebar history, resume)
 - Auto-summarization context khi hội thoại dài
-- **Realtime transcription** (Soniox STT) — voice → text → inject vào RAG
+- **Realtime transcription & translation** (Soniox STT) — voice → text → translation → inject vào RAG
 
 ---
 
@@ -28,7 +28,7 @@
 | **Long-term Memory** | mem0ai lưu facts/preferences/summary per user_id vào Qdrant collection `mem0_memories`. Tools: `store_memory`, `retrieve_memory`. |
 | **Session Persistence** | `DynamoDBSessionService` extends ADK `BaseSessionService`. PK=`{app_name}#{user_id}`, SK=`session_id`. Title auto-extract từ first message. `GET /sessions`, `GET /sessions/{id}`, `DELETE /sessions/{id}`. |
 | **Context Filter** | `ContextFilterPlugin` — async `before_model_callback`. Truncation khi `max_context_messages < len < summary_threshold`; auto-summarize (Gemini) khi `≥ summary_threshold` (default 30). Summary lưu vào ADK session state → persist DynamoDB. Frontend vẫn load full history. |
-| **Realtime Transcription** | Soniox STT WebSocket. Flow: `POST /transcription/start` → `POST /transcription/audio/{id}` (binary PCM16) → `GET /transcription/stream/{id}` (SSE) → `POST /transcription/stop/{id}`. Agent có thể search transcript qua `search_meeting_transcripts` tool. |
+| **Realtime Transcription** | Soniox STT WebSocket (v2 SDK). Flow: `POST /transcription/start` → `POST /transcription/audio/{id}` (binary PCM16) → `GET /transcription/stream/{id}` (SSE) → `POST /transcription/stop/{id}`. Hỗ trợ dịch thuật thời gian thực và diarization. Agent có thể search transcript qua `search_meeting_transcripts` tool. |
 | **Meeting Storage** | DynamoDB `memrag-meetings` (single-table). Metadata: `PK=USER#{user_id}, SK=MEETING#{id}`; utterances: `PK=MEETING#{id}, SK=UTTERANCE#{ts}#{seq}`. Qdrant collection `meetings` lưu transcript chunks (time-window 60s / max 300 words). Danh sách meeting qua `list_meetings` ADK tool; search nội dung qua `search_meeting_transcripts`. `GET /meetings`, `GET /meetings/{id}/transcript`, `DELETE /meetings/{id}`. |
 | **Wiki Knowledge Base** | AI-generated structured wiki pages tự động xây dựng sau mỗi ingestion event (PDF upload / transcript stop). 3-tier pipeline: MAP (extract entities+topics) → REDUCE (deduplicate) → SYNTHESIZE (LLM merge content). Frontend React Flow knowledge graph visualization với filtering by source. Xem `docs/wiki.md`. |
 | **File Storage** | S3 (production) hoặc local filesystem. Backend auto-switch qua `STORAGE_BACKEND` env var. Presigned URL 1h cho download. |
@@ -280,7 +280,7 @@ proj2/
 | `S3_REGION` | nếu s3 | `ap-southeast-2` |
 | `ALLOWED_ORIGINS` | - | JSON array: `["http://localhost:5173"]` (không phải comma-separated) |
 | `SONIOX_API_KEY` | nếu dùng transcription | Soniox account API key |
-| `SONIOX_MODEL` | - | Default: `stt-rt-preview` |
+| `SONIOX_MODEL` | - | Default: `stt-rt-v4` |
 | `SONIOX_TARGET_LANG` | - | Default: `vi` (tiếng Việt) |
 | `MAX_CONTEXT_MESSAGES` | - | Default: 20 |
 | `SUMMARY_THRESHOLD` | - | Default: 30 (số messages trước khi auto-summarize) |
@@ -343,3 +343,11 @@ volumes:
 docker compose up -d       # qdrant + dynamodb-local + backend
 cd frontend && npm run dev  # :5173, proxy /api → :8000
 ```
+
+---
+
+## 8. Tài liệu kỹ thuật khác
+
+- **[Testing Strategy](file:///home/minhdd/pet_proj_v2/pet_proj/proj2/docs/testing.md)** — Chi tiết về hệ thống test, mocking và cách chạy test.
+- **[Wiki Knowledge Base](file:///home/minhdd/pet_proj_v2/pet_proj/proj2/docs/wiki.md)** — Luồng tự động xây dựng kiến thức.
+- **[CI/CD Flow](file:///home/minhdd/pet_proj_v2/pet_proj/proj2/docs/cicd-flow.md)** — Quy trình deploy tự động.

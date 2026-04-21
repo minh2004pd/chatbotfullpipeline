@@ -20,10 +20,13 @@ uv sync
 uv run pytest tests/ -v
 
 # Run a single test file
-uv run pytest tests/test_chat.py -v
+uv run pytest tests/api/test_chat.py -v
 
 # Run a single test
-uv run pytest tests/test_chat.py::test_chat_basic -v
+uv run pytest tests/api/test_chat.py::test_chat_basic -v
+
+# Run a test subdirectory
+uv run pytest tests/services/ -v
 
 # Run with coverage
 uv run pytest tests/ --cov=app --cov-report=term-missing
@@ -72,6 +75,12 @@ HTTP Request → FastAPI Router (api/v1/) → Service Layer → Repository / ADK
 - Summary format có cấu trúc 4 sections, dùng `summary_model` (gemini-2.0-flash)
 - `conversation_summary` + `summary_covered_count` persist vào DynamoDB qua ADK session state
 
+**Redis Caching** (`core/cache.py`): `CacheService` wraps redis.asyncio with graceful degradation — app works fine without Redis. Cache keys use `hashlib.md5` for stable cross-process hashing. Serialisation: `model_dump(mode="json")` for Pydantic models (not `model_dump()` — datetime objects aren't JSON-serialisable). Invalidation strategy: session list cache invalidated only on `create_session()` and `delete_session()` (NOT on every chat message — `append_event` called 50-100x per streaming conversation). Document list invalidated on upload/delete. Wiki repo uses read-through cache with write-through invalidation on all mutating methods.
+- Production: AWS ElastiCache Redis (`cache.t3.micro`, single-node) in private subnets. `REDIS_URL` auto-configured via Terraform. At-rest encryption enabled, transit encryption disabled for simplicity.
+- Docker local: `redis:7-alpine` container on port 6379 (see `docker-compose.yml`). `REDIS_URL=redis://redis:6379/0`.
+- CI/CD: `REDIS_ENABLED=false` — cache tests use mock.
+- Config: `REDIS_ENABLED`, `REDIS_URL`, `REDIS_DEFAULT_TTL=300`, `REDIS_WIKI_TTL=600`, `REDIS_USER_TTL=300`, `REDIS_GRAPH_TTL=120`, `REDIS_SESSION_LIST_TTL=60`, `REDIS_DOCS_LIST_TTL=60`.
+
 **Database clients** (`core/database.py`): All clients (`get_qdrant_client`, `get_async_qdrant_client`, `get_mem0_client`, `get_dynamodb_resource`) use `lru_cache` — single instance per process. `ensure_collections()` và `ensure_dynamo_table()` đều được gọi at app startup trong `lifespan`.
 
 **Session Persistence** (`services/dynamo_session_service.py`): `DynamoDBSessionService` extends ADK `BaseSessionService`, lưu sessions vào DynamoDB. DynamoDB table key: `PK={app_name}#{user_id}`, `SK=session_id`. Title auto-extracted từ first user message trong `append_event()`. `float` ↔ `Decimal` conversion bắt buộc cho DynamoDB. Docker local dùng `amazon/dynamodb-local` trên port 8001; production dùng AWS DynamoDB (IAM role hoặc env vars). API endpoints: `GET /api/v1/sessions`, `GET /api/v1/sessions/{id}`, `DELETE /api/v1/sessions/{id}`.
@@ -84,7 +93,13 @@ HTTP Request → FastAPI Router (api/v1/) → Service Layer → Repository / ADK
 
 **Exception handlers** (`exceptions/handlers.py`): Global FastAPI handlers for `ValueError` → 400, `FileNotFoundError` → 404, and catch-all `Exception` → 500.
 
-**Soniox Transcription** (`services/soniox_service.py`): Module-level `_sessions` dict (singleton per process) quản lý active WebSocket connections tới Soniox API. Flow: `POST /transcription/start` → mở WS + background receiver task + tạo meeting record → `POST /transcription/audio/{id}` (binary PCM16 chunks) → `GET /transcription/stream/{id}` (SSE) → `POST /transcription/stop/{id}` lưu utterances vào DynamoDB + ingest Qdrant. Dùng `websockets.asyncio.client` (v14+ API). ADK tool `search_meeting_transcripts` cho phép agent search trong transcript.
+**Soniox Transcription** (`services/soniox_service.py`): Module-level `_sessions` dict (singleton per process) quản lý active WebSocket connections tới Soniox API. Flow: `POST /transcription/start` → mở WS + background receiver task + tạo meeting record → `POST /transcription/audio/{id}` (binary PCM16 chunks) → `GET /transcription/stream/{id}` (SSE) → `POST /transcription/stop/{id}` lưu utterances vào DynamoDB + ingest Qdrant. Dùng `websockets.asyncio.client` (v14+ API).
+- **Endpoint detection** (`enable_endpoint_detection=True` default): Soniox semantic endpointing detect khi speaker dừng nói → finalize tất cả non-final tokens ngay + gửi `<end>` token. `max_endpoint_delay_ms` (500–3000, default 1000ms) điều chỉnh delay tối đa trước khi endpoint được return. Khi `<end>` nhận được, buffer được flush thành utterance.
+- **Utterance buffer pattern**: `_receiver_loop` tích lũy final tokens vào `buffer_final_tokens`. Khi nhận `<end>` token hoặc session `finished`, `_flush_buffer()` gom buffered tokens → tách `original` vs `translation` qua `translation_status` → tạo utterance. Non-final tokens reset mỗi response cho live partial display.
+- **Token translation_status**: `"none"` (không dịch), `"original"` (text gốc, sẽ theo sau bởi translation tokens), `"translation"` (text đã dịch). Dùng `_split_translation_tokens()` để tách. Không còn `translated_tokens` field riêng.
+- **Language identification** (`enable_language_identification`): mỗi token kèm `language` field.
+- **Context & terms**: có thể gửi `context` dict (general, text, terms, translation_terms) để improve accuracy cho domain cụ thể.
+- **Config**: `SONIOX_API_KEY`, `SONIOX_MODEL` (default `stt-rt-v4`), `SONIOX_TARGET_LANG` (default `vi`), `SONIOX_ENDPOINT_DELAY_MS` (default `1000`).
 
 **Meeting Storage**: DynamoDB table `memrag-meetings` (single-table design) — `PK=USER#{user_id}, SK=MEETING#{id}` cho metadata; `PK=MEETING#{id}, SK=UTTERANCE#{ts}#{seq}` cho utterances. Qdrant collection `meetings` lưu chunked transcript embeddings (time-window 60s hoặc max 300 words/chunk). `ensure_meetings_table()` tạo table tự động khi startup. ADK tool `list_meetings` cho phép agent liệt kê tất cả meeting của user (dùng khi hỏi chung chung như "tôi có những cuộc họp nào?"); `search_meeting_transcripts` để tìm nội dung cụ thể bên trong.
 
@@ -115,8 +130,8 @@ HTTP Request → FastAPI Router (api/v1/) → Service Layer → Repository / ADK
 - **CloudFront reverse proxy**: Production CloudFront distribution routes `/api/*` → EC2 backend (HTTP :8000) and `/*` → S3 frontend. FE is built with `VITE_API_BASE_URL=""` so axios uses relative URLs — same-origin, no CORS needed. `compress=false` on the `/api/*` behavior prevents buffering SSE streams at the edge.
 - **Context summarization config** (tunable via `.env`): `SUMMARY_THRESHOLD=22`, `SUMMARY_KEEP_RECENT=10`, `MAX_CONTEXT_MESSAGES=20`. `SCORE_THRESHOLD=0.6` loại RAG results thấp. `MEMORY_SEARCH_LIMIT=15` search rộng rồi rerank top-7.
 - **Model config** (`core/llm_config.yaml`): `model` (Root agent), `temperature/top_p/top_k/max_output_tokens`, `system_instruction` (chi tiết chiến lược gọi tools, trigger patterns). ⚠️ `gemini-2.0-flash-lite` đã deprecated — dùng `gemini-2.0-flash`.
-- **Soniox config** (local `.env`): `SONIOX_API_KEY=xxx`, `SONIOX_MODEL=stt-rt-preview` (default), `SONIOX_TARGET_LANG=vi` (default). Không cần thay đổi docker-compose — Soniox là external API.
-- **CI/CD test env vars**: Backend test job requires `GEMINI_API_KEY`, `DEBUG=true`, `JWT_SECRET_KEY`, `ALLOWED_ORIGINS` để pass Settings validation.
+- **Soniox config** (local `.env`): `SONIOX_API_KEY=xxx`, `SONIOX_MODEL=stt-rt-v4` (default), `SONIOX_TARGET_LANG=vi` (default), `SONIOX_ENDPOINT_DELAY_MS=1000` (default). Không cần thay đổi docker-compose — Soniox là external API. Terraform passes `SONIOX_ENDPOINT_DELAY_MS` to ECS task env vars.
+- **CI/CD test env vars**: Backend test job requires `GEMINI_API_KEY`, `SONIOX_API_KEY`, `DEBUG=true`, `JWT_SECRET_KEY`, `ALLOWED_ORIGINS`, `REDIS_ENABLED=false` để pass Settings validation. Redis disabled in CI — cache tests use mock.
 
 ### Dependency Injection
 
@@ -126,7 +141,8 @@ get_qdrant_client()        [lru_cache] → get_qdrant_repo() → get_rag_service
 get_mem0_client()          [lru_cache] → get_mem0_repo()   → get_memory_service()
 get_dynamodb_resource()    [lru_cache] → get_dynamo_session_service() [lru_cache] ─┐
 get_runner()               [lru_cache] ────────────────────────────────────────────┼─ get_chat_service()
-get_settings()             [lru_cache] ────────────────────────────────────────────┘
+get_settings()             [lru_cache] ────────────────────────────────────────────┤
+get_cache_service_dep()    [lru_cache] ────────────────────────────────────────────┘
                                           get_dynamo_session_service() ─────────────── SessionServiceDep (sessions router)
 ```
 
@@ -153,7 +169,7 @@ Key async mock rules:
 
 **Backend** (`.github/workflows/ci-cd.yml`):
 1. **Lint** — ruff format + check
-2. **Test** — pytest with coverage (requires `GEMINI_API_KEY`, `DEBUG=true`, `JWT_SECRET_KEY`, `ALLOWED_ORIGINS`)
+2. **Test** — pytest with coverage (requires `GEMINI_API_KEY`, `SONIOX_API_KEY`, `DEBUG=true`, `JWT_SECRET_KEY`, `ALLOWED_ORIGINS`, `REDIS_ENABLED=false`)
 3. **Build & Push** — Docker image → ECR
 4. **Deploy** — ECS rolling update (wait for stability)
 
@@ -165,12 +181,19 @@ Key async mock rules:
 
 Use **Conventional Commits**: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`. Example: `feat: add voice transcription to RAG pipeline`.
 
-## Working with Claude
+## Development Rules
 
-- Propose a plan before implementing; explain tradeoffs when suggesting changes.
-- Vietnamese comments and responses are fine.
-- Update `docs/` after adding or changing a feature.
-- Changing embedding dimension requires a full Qdrant reset: `docker compose down -v && docker compose up -d` (all data lost).
+Để đảm bảo chất lượng code và khả năng deploy mượt mà, hãy tuân thủ các quy tắc sau:
+
+1.  **Testing Mandatory**: Khi sửa bug hoặc thêm tính năng mới, **LUÔN LUÔN** chạy toàn bộ test suite (`/check-all` hoặc `cd backend && uv run pytest`) trước khi hoàn thành task.
+2.  **New Features Require New Tests**: Mọi tính năng hoặc chức năng mới **BẮT BUỘC** phải có test case đi kèm (unit test hoặc integration test).
+3.  **Documentation First**: Mọi thay đổi về logic hoặc cấu trúc hệ thống phải được cập nhật ngay lập tức vào:
+    -   Thư mục `docs/` (các file spec, wiki, memory tương ứng).
+    -   `CLAUDE.md` (section Architecture, Key Design Decisions hoặc Tools).
+    -   `README.md` (nếu có thay đổi về features hoặc tech stack).
+4.  **Linting**: Chạy `/lint-fix` trước khi commit để đảm bảo code style nhất quán.
+
+## Working with Claude
 
 ## Skills
 

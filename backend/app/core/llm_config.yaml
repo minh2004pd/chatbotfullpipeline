@@ -128,7 +128,7 @@ prompts:
 
     ## Nội dung cần phân tích:
     {text}
-
+    {wiki_context}
   wiki_synthesis_prompt: |
     ## Quy tắc Wiki (wiki_schema.md — nguồn sự thật, ưu tiên hơn mọi hướng dẫn bên dưới nếu mâu thuẫn):
     {schema}
@@ -306,6 +306,50 @@ prompts:
       Slug chỉ gồm `[a-z0-9]`, KHÔNG dùng gạch ngang, KHÔNG dùng `[[slug]]` thuần.
       Ví dụ: `[[pages/entities/imagenet.md]]`, `[[pages/entities/lora.md]]`, `[[pages/entities/googledeepmind.md]]`, `[[pages/topics/efficientml.md]]`.
     - Section "Entities liên quan" PHẢI liệt kê đầy đủ các entity được nhắc đến, mỗi entity một dòng với `[[pages/entities/slug.md]]` và mô tả quan hệ.
+
+  wiki_conversation_relevance_prompt: |
+    Đánh giá xem conversation summary dưới đây có chứa thông tin kỹ thuật đáng cập nhật vào Wiki không.
+
+    ## Wiki hiện có:
+    {wiki_context}
+
+    ## Conversation Summary:
+    {summary_text}
+
+    ## Nhiệm vụ:
+    1. Xác định summary có chứa thông tin kỹ thuật mới (số liệu, kết luận, quyết định, phát hiện) liên quan đến entities/topics đã có trong Wiki không.
+    2. Nếu có, liệt kê các slug (chỉ slug, không có category) của các trang cần update.
+    3. Chitchat, câu hỏi chung, greeting, hỏi về tính năng app → KHÔNG update.
+
+    Trả về JSON object (chỉ JSON thuần, không có text khác):
+    {{"should_update": true/false, "matched_slugs": ["slug1", "slug2"], "reason": "lý do ngắn gọn"}}
+
+    Quy tắc:
+    - `should_update=true` CHỈ KHI có ít nhất 1 matched_slug VÀ có thông tin kỹ thuật thực sự mới
+    - `matched_slugs` chỉ dùng các slug đã có trong danh sách Wiki hiện có ở trên
+    - Tối đa 5 slugs
+
+  wiki_conversation_synthesis_prompt: |
+    Bổ sung thông tin mới từ conversation vào trang Wiki đã có.
+
+    ## Trang Wiki hiện tại (KHÔNG thay đổi structure, KHÔNG xóa thông tin cũ):
+    {existing_content}
+
+    ## Thông tin mới từ conversation (chỉ lấy facts kỹ thuật liên quan):
+    {new_info}
+
+    ## Quy tắc BẮT BUỘC:
+    1. CHỈ thêm thông tin mới vào section phù hợp — KHÔNG thay đổi structure, KHÔNG xóa bất kỳ thông tin nào
+    2. Nếu thông tin đã có → KHÔNG lặp lại, bỏ qua
+    3. Giữ nguyên frontmatter (title, tags, sources, last_updated, version) — chỉ tăng version thêm 1
+    4. Thêm `conversation:{source_id}` vào sources list nếu chưa có
+    5. Nếu không có thông tin mới thực sự → trả về NGUYÊN XI trang Wiki hiện tại (không thay đổi gì)
+    6. Giữ nguyên tất cả `[[pages/...]]` links
+    7. KHÔNG bịa thêm thông tin không có trong conversation
+
+    Trả về toàn bộ nội dung trang Markdown (bao gồm frontmatter).
+    Source ID để thêm vào sources: {source_id}
+    Tên trang: {topic_title}
 
 rag:
   chunk_size: 1000

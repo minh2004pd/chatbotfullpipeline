@@ -69,7 +69,9 @@ class RAGService:
             file_hash=file_hash,
         )
 
-        logger.info("rag_ingest_done", document_id=document_id, chunks=chunk_count, file_hash=file_hash)
+        logger.info(
+            "rag_ingest_done", document_id=document_id, chunks=chunk_count, file_hash=file_hash
+        )
         return document_id, chunk_count
 
     def search(self, query: str, user_id: str | None = None) -> list[dict]:

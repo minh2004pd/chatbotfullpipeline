@@ -1,4 +1,19 @@
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: memrag-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
   qdrant:
     image: qdrant/qdrant:latest
     container_name: memrag-qdrant
@@ -28,12 +43,12 @@ services:
       POSTGRES_PASSWORD: memrag
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U memrag -d memrag"]
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   backend:
     build: ./backend
@@ -41,24 +56,29 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      - qdrant
-      - dynamodb-local
-      - postgres
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      dynamodb-local:
+        condition: service_started
+      postgres:
+        condition: service_healthy
     env_file:
       - .env
     environment:
+      - DEBUG=true
       - QDRANT_URL=http://qdrant:6333
       - DYNAMODB_ENDPOINT_URL=http://dynamodb-local:8000
       - DATABASE_URL=postgresql+asyncpg://memrag:memrag@postgres:5432/memrag
-    volumes:
-      - uploads_data:/app/uploads
+      - REDIS_URL=redis://redis:6379/0
     restart: unless-stopped
 
 volumes:
   qdrant_data:
-  uploads_data:
   postgres_data:
+  redis_data:
 
-# http://0.0.0.0:8000/docs
+# http://localhost:8000/docs
 # http://localhost:6333/dashboard
 # http://localhost:8001  (DynamoDB Local — dùng AWS CLI hoặc NoSQLWorkbench để xem)

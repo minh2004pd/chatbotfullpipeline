@@ -9,6 +9,7 @@ export default function LoginPage() {
   const [mode, setMode] = useState<AuthMode>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -22,6 +23,11 @@ export default function LoginPage() {
 
     try {
       if (mode === 'register') {
+        if (password !== confirmPassword) {
+          setError('Mật khẩu xác nhận không khớp.')
+          setLoading(false)
+          return
+        }
         const res = await authApi.register({
           email,
           password,
@@ -80,7 +86,7 @@ export default function LoginPage() {
           {/* Tab toggle */}
           <div className="flex bg-[#1a1a1a] rounded-lg p-0.5 mb-6">
             <button
-              onClick={() => { setMode('login'); setError('') }}
+              onClick={() => { setMode('login'); setError(''); setConfirmPassword('') }}
               className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-md text-xs font-medium transition-colors ${
                 mode === 'login'
                   ? 'bg-[#2a2a2a] text-[#f1f1f1]'
@@ -91,7 +97,7 @@ export default function LoginPage() {
               Đăng nhập
             </button>
             <button
-              onClick={() => { setMode('register'); setError('') }}
+              onClick={() => { setMode('register'); setError(''); setConfirmPassword('') }}
               className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-md text-xs font-medium transition-colors ${
                 mode === 'register'
                   ? 'bg-[#2a2a2a] text-[#f1f1f1]'
@@ -148,6 +154,27 @@ export default function LoginPage() {
                 className="w-full bg-[#0f0f0f] border border-[#2e2e2e] rounded-lg pl-9 pr-3 py-2.5 text-sm text-[#f1f1f1] placeholder-[#444] outline-none focus:border-violet-500 transition-colors"
               />
             </div>
+            {mode === 'register' && (
+              <div className="relative">
+                <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#444]" />
+                <input
+                  type="password"
+                  placeholder="Xác nhận mật khẩu"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  required
+                  minLength={6}
+                  className={`w-full bg-[#0f0f0f] border rounded-lg pl-9 pr-3 py-2.5 text-sm text-[#f1f1f1] placeholder-[#444] outline-none transition-colors ${
+                    confirmPassword && confirmPassword !== password
+                      ? 'border-red-500/60 focus:border-red-500'
+                      : 'border-[#2e2e2e] focus:border-violet-500'
+                  }`}
+                />
+                {confirmPassword && confirmPassword !== password && (
+                  <p className="text-[10px] text-red-400 mt-1 ml-1">Mật khẩu không khớp</p>
+                )}
+              </div>
+            )}
             <button
               type="submit"
               disabled={loading}

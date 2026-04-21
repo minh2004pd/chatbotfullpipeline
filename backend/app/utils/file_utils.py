@@ -31,6 +31,7 @@ def chunk_text(
     chunk_overlap: int = 200,
 ) -> list[str]:
     """Chia text thành các chunks nhỏ."""
+    chunk_overlap = min(chunk_overlap, max(0, chunk_size - 1))
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,

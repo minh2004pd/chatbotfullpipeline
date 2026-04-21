@@ -1,25 +1,27 @@
 FROM python:3.11-slim
 
-# Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+RUN useradd -m -d /home/appuser appuser
 
 WORKDIR /app
 
-# Copy dependency files (cả uv.lock để build deterministic)
 COPY pyproject.toml uv.lock ./
 
-# Install dependencies (no dev group, --frozen đảm bảo dùng đúng lockfile)
-RUN uv sync --no-dev --no-cache --frozen
+RUN uv sync --no-dev --no-cache --locked
 
-# Copy source
 COPY app/ ./app/
 
-# Create uploads and logs directory
-RUN mkdir -p /app/uploads /app/logs
+RUN mkdir -p /app/uploads /app/logs /app/wiki && \
+    chown appuser:appuser /app/uploads /app/logs /app/wiki
 
+ENV HOME=/home/appuser
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8000
+
+USER appuser
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

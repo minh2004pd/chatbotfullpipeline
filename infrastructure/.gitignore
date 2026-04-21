@@ -1,0 +1,19 @@
+# Terraform state & backup — KHÔNG commit state lên git
+terraform.tfstate
+terraform.tfstate.*
+*.tfstate.backup
+
+# Variables thật — chỉ commit .example
+terraform.tfvars
+
+# Provider plugins
+.terraform/
+
+# Lock file (keep this — nó lock provider versions)
+# .terraform.lock.hcl NÊN được commit
+
+# OS files
+.DS_Store
+
+# Node (nếu có lambda scripts)
+node_modules/

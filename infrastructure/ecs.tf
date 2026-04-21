@@ -52,10 +52,15 @@ resource "aws_ecs_task_definition" "backend" {
         { name = "DYNAMODB_REGION", value = var.aws_region },
         # Meetings table for voice/transcription RAG
         { name = "MEETINGS_TABLE_NAME", value = aws_dynamodb_table.meetings.name },
+        # Wiki knowledge base — dùng S3 backend (STORAGE_BACKEND đã set ở trên)
+        { name = "WIKI_ENABLED", value = "true" },
         # Soniox realtime transcription (non-secret config)
         { name = "SONIOX_MODEL", value = var.soniox_model },
         { name = "SONIOX_TARGET_LANG", value = var.soniox_target_lang },
         { name = "SONIOX_WS_URL", value = var.soniox_ws_url },
+        { name = "SONIOX_ENDPOINT_DELAY_MS", value = tostring(var.soniox_endpoint_delay_ms) },
+        # ElastiCache Redis
+        { name = "REDIS_URL", value = "redis://${aws_elasticache_replication_group.redis.primary_endpoint_address}:6379/0" },
         # RDS PostgreSQL
         { name = "DATABASE_HOST", value = aws_db_instance.postgres.address },
         { name = "DB_USERNAME", value = var.db_username },

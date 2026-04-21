@@ -1,12 +1,8 @@
 """Unit tests cho app.utils.file_utils — File processing utilities."""
 
 import base64
-import io
-import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from app.utils.file_utils import (
     chunk_text,
@@ -16,7 +12,6 @@ from app.utils.file_utils import (
     save_upload_file,
     validate_pdf,
 )
-
 
 # ── validate_pdf ──────────────────────────────────────────────────────────────
 

@@ -1,7 +1,7 @@
 # Wiki Knowledge Base — MemRAG
 
 > Hệ thống tự động xây dựng và duy trì structured knowledge base từ documents và meeting transcripts.
-> Cập nhật lần cuối: 2026-04-09
+> Cập nhật lần cuối: 2026-04-21
 
 ---
 
@@ -82,21 +82,25 @@ API giống hệt nhau — `read_page()`, `write_page()`, `list_all_pages()`, v.
 
 ## 4. Pipeline xử lý (4 Phase)
 
-Trigger: `WikiService.update_wiki_from_document()` (PDF upload) hoặc `update_wiki_from_transcript()` (transcript stop).
+Trigger: `WikiService.update_wiki_from_document()` (PDF upload), `update_wiki_from_transcript()` (transcript stop), hoặc `update_wiki_from_conversation_summary()` (conversation summary — xem Section 16).
 
-Cả hai đều gọi `_process_source()` — fire-and-forget background task.
+Các ingestion events gọi `_process_source()` — fire-and-forget background task.
 
-### Phase 1: MAP — Parallel Extraction
+### Phase 1: MAP — Context-Aware Parallel Extraction
 
 ```
 Raw text → Split thành chunks (WIKI_CHUNK_SIZE = 16384 chars)
     ↓
-Mỗi chunk → _extract_topics() [LLM: gemini-2.0-flash]
+_get_existing_wiki_context() — đọc index.md, trích xuất danh sách entities/topics đã có
+    ↓
+Mỗi chunk → _extract_topics(text, source_name, wiki_context) [LLM: gemini-2.0-flash]
     ↓
 Parallel: asyncio.gather với semaphore (WIKI_MAX_PARALLEL_EXTRACTIONS = 5)
     ↓
 Kết quả: list[entities, topics, summary] per chunk
 ```
+
+**Context-Aware**: LLM nhận danh sách tối đa 50 entities/topics đã có trong wiki. Nếu nội dung mới liên quan → LLM reuse slug đã có thay vì tạo slug mới trùng nghĩa. Chỉ tạo slug mới khi entity/topic chưa từng xuất hiện.
 
 **LLM prompt** trả về JSON:
 ```json
@@ -440,6 +444,8 @@ Polling: bắt đầu sau 1.5s, interval 2s, timeout 120s.
 | `WIKI_MAX_PARALLEL_EXTRACTIONS` | `5` | Concurrent _extract_topics calls |
 | `WIKI_MAX_PARALLEL_SYNTHESIS` | `5` | Concurrent _synthesize_page calls |
 | `WIKI_SYNTHESIS_MAX_TEXT_PER_PAGE` | `32768` | Max merged text per page |
+| `WIKI_CONVERSATION_UPDATE_ENABLED` | `true` | Feed conversation summaries vào wiki |
+| `WIKI_CONVERSATION_MAX_PAGES_PER_UPDATE` | `5` | Max pages update per conversation summary |
 
 ---
 
@@ -491,7 +497,45 @@ frontend/src/
 
 ---
 
-## 16. Wiki Schema (Hiến pháp)
+## 16. Conversation Summary → Wiki Integration
+
+Khi `context_filter_plugin` tự động tóm tắt hội thoại (vượt `SUMMARY_THRESHOLD` ~22 messages), summary đó được **feed vào WikiService** để cập nhật wiki có chọn lọc.
+
+### Flow
+
+```
+User chat → messages > summary_threshold
+    ↓
+context_filter_plugin._generate_summary() [blocking lần đầu / background lần sau]
+    ↓
+_schedule_wiki_update_from_summary() — fire-and-forget
+    ↓
+WikiService.update_wiki_from_conversation_summary()
+    ├── _get_existing_wiki_context() — lấy danh sách entities đã có
+    ├── _assess_summary_relevance() [LLM] — đánh giá có nên update không
+    │       → {"should_update": bool, "matched_slugs": [...]}
+    ├── [skip nếu should_update=false hoặc wiki rỗng]
+    └── _update_page() per matched slug [LLM: conservative merge]
+            → Chỉ bổ sung facts mới, KHÔNG thay đổi structure, KHÔNG xóa thông tin cũ
+```
+
+### Đặc điểm
+
+- **Conservative**: Chỉ update pages **đã tồn tại** — KHÔNG tạo page mới từ conversation
+- **Selective**: LLM relevance check lọc chitchat, greeting, câu hỏi chung — chỉ update khi có technical facts mới
+- **Non-blocking**: Chạy hoàn toàn background, không ảnh hưởng đến chat response
+- **Rate-implicit**: Mỗi trigger wiki update phải qua LLM relevance check → tự nhiên throttle khi không có info mới
+
+### Config
+
+| Variable | Default | Mô tả |
+|----------|---------|-------|
+| `WIKI_CONVERSATION_UPDATE_ENABLED` | `true` | Bật/tắt tính năng |
+| `WIKI_CONVERSATION_MAX_PAGES_PER_UPDATE` | `5` | Số pages tối đa update per trigger |
+
+---
+
+## 17. Wiki Schema (Hiến pháp)
 
 `wiki_schema.md` là **Single Source of Truth** về quy tắc wiki của mỗi user. Được **dynamic injection** vào prompt khi LLM synthesize pages.
 

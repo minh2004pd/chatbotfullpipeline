@@ -1,15 +1,13 @@
 """Unit tests cho app.core.indexing_status — Wiki status in-memory store."""
 
-import time
 from unittest.mock import patch
 
 import pytest
 
 from app.core import indexing_status
 from app.core.indexing_status import (
-    _WikiEntry,
     _cleanup,
-    _store,
+    _WikiEntry,
     get_wiki_status,
     set_wiki_status,
 )
@@ -149,11 +147,12 @@ class TestWikiStatusExpiry:
         """_cleanup() xóa user entry khi tất cả documents đã expire."""
         now = 1000.0
         mock_monotonic.return_value = now
+        set_wiki_status("user-1", "doc-1", "processing")  # created_at=1000
 
-        set_wiki_status("user-1", "doc-1", "processing")
-        set_wiki_status("user-2", "doc-1", "processing")
+        # user-2 created 100s later → age at now+700 is exactly 600 (not > 600)
+        mock_monotonic.return_value = now + 100
+        set_wiki_status("user-2", "doc-1", "processing")  # created_at=1100
 
-        # Only user-1's entry expires
         mock_monotonic.return_value = now + 700
         _cleanup()
 

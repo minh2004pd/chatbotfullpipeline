@@ -21,6 +21,7 @@ def mock_qdrant_repo():
     repo.search.return_value = []
     repo.list_documents.return_value = []
     repo.count_chunks.return_value = 0
+    repo.find_by_hash.return_value = None
     return repo
 
 

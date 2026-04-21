@@ -1,6 +1,6 @@
 # Kiến trúc Cloud — MemRAG Chatbot
 
-> Cập nhật lần cuối: 2026-04-14
+> Cập nhật lần cuối: 2026-04-21
 
 ## ⚠️ Lưu ý quan trọng về AWS Free Tier
 

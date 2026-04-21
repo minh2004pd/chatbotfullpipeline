@@ -33,6 +33,8 @@ class PromptsSettings(BaseModel):
     system_instruction: str = ""
     wiki_topic_extract_prompt: str = ""
     wiki_synthesis_prompt: str = ""
+    wiki_conversation_relevance_prompt: str = ""
+    wiki_conversation_synthesis_prompt: str = ""
 
 
 class RAGSettings(BaseModel):

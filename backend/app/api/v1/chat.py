@@ -35,7 +35,6 @@ async def chat_stream(
         try:
             async for chunk in service.chat_stream(request):
                 if isinstance(chunk, dict):
-                    # Wiki access event — pass-through as structured SSE
                     yield f"data: {json.dumps(chunk)}\n\n"
                 else:
                     yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"

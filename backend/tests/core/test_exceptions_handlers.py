@@ -1,13 +1,10 @@
 """Unit tests cho app.exceptions.handlers — Global exception handlers."""
 
-from unittest.mock import MagicMock
-
 import pytest
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.exceptions.handlers import register_exception_handlers
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -38,7 +35,7 @@ def app_with_handlers():
 
 @pytest.fixture
 def client(app_with_handlers):
-    return TestClient(app_with_handlers)
+    return TestClient(app_with_handlers, raise_server_exceptions=False)
 
 
 # ── ValueError handler ────────────────────────────────────────────────────────

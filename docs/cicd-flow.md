@@ -1,6 +1,7 @@
 # CI/CD Flow — MemRAG Chatbot
 
 ## Tổng quan
+> Cập nhật lần cuối: 2026-04-21
 
 Dự án có **2 pipeline độc lập**, mỗi pipeline trigger theo thay đổi của phần code tương ứng:
 
