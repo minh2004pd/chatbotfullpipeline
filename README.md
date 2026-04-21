@@ -1,201 +1,401 @@
-# MemRAG Chatbot
+<div align="center">
 
-Multimodal AI chatbot cá nhân hóa xây dựng trên nền tảng **Google Agent Development Kit (ADK)**. Hệ thống kết hợp RAG (Retrieval-Augmented Generation), bộ nhớ dài hạn (Long-term memory), và khả năng xử lý đa phương thức để tạo ra trải nghiệm AI thông minh, ghi nhớ ngữ cảnh và hỗ trợ quản lý kiến thức hiệu quả.
+# 🤖 MemRAG Chatbot
 
-**Live Demo:** [https://d3qrt08bgfyl3d.cloudfront.net](https://d3qrt08bgfyl3d.cloudfront.net)
+**Multimodal AI Research Assistant** được xây dựng trên **Google Agent Development Kit (ADK)**
 
----
+Kết hợp RAG · Bộ nhớ dài hạn · Transcription thời gian thực · Wiki Knowledge Graph
 
-## ✨ Features
-
-- **🚀 Realtime Chat Streaming** — Sử dụng SSE (Server-Sent Events) để trả về token ngay khi được tạo (token-by-token).
-- **📄 Multimodal PDF RAG** — Upload tài liệu PDF, AI tự động chunking, embedding và tìm kiếm ngữ nghĩa để trả lời có trích dẫn (citations).
-- **🧠 Long-term Memory** — Tích hợp **mem0** để ghi nhớ thông tin cá nhân, sở thích và sự kiện quan trọng giữa các phiên hội thoại.
-- **🎙️ Realtime Transcription & Translation** — Hỗ trợ transcription và dịch thuật thời gian thực (60+ ngôn ngữ) qua Soniox STT, tự động lưu trữ và đưa vào bộ nhớ RAG của meeting.
-- **🌐 Wiki Knowledge Base** — Tự động tổng hợp kiến thức từ các tài liệu đã upload và các cuộc họp thành các bài Wiki có cấu trúc và đồ thị kiến thức (Knowledge Graph).
-- **🖼️ Multimodal Vision** — Gửi kèm hình ảnh trong câu hỏi để AI phân tích và trả lời (sử dụng Gemini Vision).
-- **💾 Session Persistence** — Lưu trữ lịch sử chat và trạng thái session bền vững trên AWS DynamoDB.
-- **⚡ Performance Optimization** — Auto-summarization context khi hội thoại quá dài để tiết kiệm token và duy trì hiệu năng LLM.
+[![Live Demo](https://img.shields.io/badge/🌐_Live_Demo-d3qrt08bgfyl3d.cloudfront.net-blue?style=for-the-badge)](https://d3qrt08bgfyl3d.cloudfront.net)
 
 ---
 
-## 🛠️ Tech Stack
+### 🛠 Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| **Frontend** | React 18, TypeScript, Vite, TailwindCSS, Zustand, React Query, React Flow |
-| **Backend** | FastAPI, Python 3.11+, Google ADK, LLM Gemini 2.0/2.5 Flash |
-| **Memory/RAG** | mem0 (Long-term), ADK Context Plugin (Short-term), LangChain |
-| **Databases** | Qdrant (Vector DB), AWS DynamoDB (Sessions/Meetings), RDS PostgreSQL (Auth/User) |
-| **Storage** | AWS S3 (PDF uploads & Frontend static hosting) |
-| **Infrastructure** | AWS ECS (EC2 host mode), CloudFront (CDN & API Gateway), ALB, Terraform |
-| **CI/CD** | GitHub Actions (Independent FE/BE pipelines) |
+![Python](https://img.shields.io/badge/Python_3.11-3776AB?style=flat-square&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
+![Google Gemini](https://img.shields.io/badge/Gemini_2.5_Flash-4285F4?style=flat-square&logo=google&logoColor=white)
+![React](https://img.shields.io/badge/React_18-61DAFB?style=flat-square&logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat-square&logo=vite&logoColor=white)
+![TailwindCSS](https://img.shields.io/badge/Tailwind_CSS-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)
+
+![AWS](https://img.shields.io/badge/AWS-232F3E?style=flat-square&logo=amazonaws&logoColor=white)
+![ECS](https://img.shields.io/badge/ECS_Fargate-FF9900?style=flat-square&logo=amazonaws&logoColor=white)
+![S3](https://img.shields.io/badge/S3-569A31?style=flat-square&logo=amazons3&logoColor=white)
+![DynamoDB](https://img.shields.io/badge/DynamoDB-4053D6?style=flat-square&logo=amazondynamodb&logoColor=white)
+![RDS](https://img.shields.io/badge/RDS_PostgreSQL-336791?style=flat-square&logo=postgresql&logoColor=white)
+![ElastiCache](https://img.shields.io/badge/ElastiCache_Redis-DC382D?style=flat-square&logo=redis&logoColor=white)
+![CloudFront](https://img.shields.io/badge/CloudFront-FF9900?style=flat-square&logo=amazonaws&logoColor=white)
+
+![Qdrant](https://img.shields.io/badge/Qdrant-FF4081?style=flat-square&logo=qdrant&logoColor=white)
+![Terraform](https://img.shields.io/badge/Terraform-7B42BC?style=flat-square&logo=terraform&logoColor=white)
+![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=flat-square&logo=githubactions&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)
+
+</div>
 
 ---
 
-## 📐 Architecture
+## ✨ Tính năng nổi bật
 
-### High-Level Flow
-Hệ thống sử dụng **CloudFront** làm điểm truy cập duy nhất (Single Entry Point), phục vụ cả Frontend tĩnh và proxy API về Backend để giải quyết vấn đề CORS và tối ưu hóa performance.
+| Tính năng | Mô tả |
+|-----------|-------|
+| 🚀 **Realtime Chat Streaming** | SSE token-by-token, phản hồi tức thì |
+| 📄 **Multimodal PDF RAG** | Upload PDF → chunk → embed → semantic search với trích dẫn |
+| 🧠 **Long-term Memory** | Tích hợp **mem0** ghi nhớ thông tin cá nhân xuyên phiên |
+| 🎙️ **Realtime Transcription** | Soniox STT, 60+ ngôn ngữ, tự lưu transcript → RAG |
+| 🌐 **Wiki Knowledge Graph** | Tự tổng hợp từ tài liệu + meetings, visualize bằng React Flow |
+| ⚡ **Redis Caching** | ElastiCache cache wiki/graph/session/docs — giảm latency |
+| 🔐 **Auth** | JWT + Google OAuth2, refresh token rotation, CSRF protection |
+| 🏗️ **IaC** | Toàn bộ hạ tầng AWS quản lý bằng Terraform |
 
-```mermaid
-graph TD
-    User["User Browser"] -- HTTPS --> CF["AWS CloudFront"]
-    CF -- "/* (Static)" --> S3FE["S3 Frontend Bucket"]
-    CF -- "/api/* (Proxy)" --> ALB["Application Load Balancer"]
-    ALB -- ":8000" --> ECS["ECS Task (FastAPI)"]
-    
-    subgraph "Backend Services"
-        ECS -- "Vector Search" --> Qdrant[Qdrant DB]
-        ECS -- "Persistence" --> Dynamo[DynamoDB]
-        ECS -- "Relational" --> RDS[PostgreSQL]
-        ECS -- "AI Tasks" --> Gemini[Gemini API]
-        ECS -- "STT" --> Soniox[Soniox WS]
-    end
+---
+
+## 🏛️ Kiến trúc hệ thống
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        USER (Browser)                                    │
+│              https://d3qrt08bgfyl3d.cloudfront.net                       │
+└────────────────────────────┬────────────────────────────────────────────┘
+                             │ HTTPS
+              ┌──────────────▼──────────────┐
+              │         CloudFront           │
+              │   /api/* → ALB (proxy)       │
+              │   /*     → S3 Frontend       │
+              └───────┬──────────┬──────────┘
+                      │          │
+          ┌───────────▼──┐  ┌────▼────────────────────────┐
+          │  S3 Bucket   │  │  Application Load Balancer   │
+          │  (React SPA) │  │  memrag-backend-alb-*.elb    │
+          └──────────────┘  └────────────┬────────────────┘
+                                         │
+              ┌──────────────────────────▼──────────────────────────┐
+              │              ECS EC2 — FastAPI Backend               │
+              │                   Port 8000                          │
+              │                                                      │
+              │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │
+              │  │ Chat API │  │ Docs API │  │ Wiki / Auth API  │  │
+              │  │  (SSE)   │  │ (upload) │  │ Transcription WS │  │
+              │  └────┬─────┘  └────┬─────┘  └────────┬─────────┘  │
+              │       │             │                  │            │
+              │  ┌────▼─────────────▼──────────────────▼──────────┐ │
+              │  │      Google ADK Agent (Gemini 2.5-flash)        │ │
+              │  │           9 Tools + ContextFilterPlugin         │ │
+              │  └────┬────┬────┬────┬────┬────┬───────────────────┘ │
+              │       │    │    │    │    │    │                     │
+              └───────┼────┼────┼────┼────┼────┼─────────────────────┘
+                      │    │    │    │    │    │
+          ┌───────────▼┐ ┌─▼──┐ │ ┌─▼──┐ │ ┌─▼──────┐
+          │  ElastiCache│ │mem0│ │ │Wiki│ │ │DynamoDB│
+          │  Redis Cache│ │    │ │ │S3  │ │ │Sessions│
+          └─────────────┘ └────┘ │ └────┘ │ └────────┘
+                              ┌──▼──┐  ┌──▼────┐
+                              │     │  │  RDS  │
+                              │Qdrant  │Postgres│
+                              │(RAG)│  │(Auth) │
+                              └─────┘  └───────┘
 ```
 
-### Cloud Infrastructure Details
-Dự án được triển khai trên AWS với cấu hình tối ưu chi phí (Free Tier friendly) nhưng vẫn đảm bảo tính ổn định:
-- **Networking**: VPC với Public/Private subnets, NAT Gateway cho outbound traffic.
-- **Compute**: EC2 t3.medium chạy ECS agent.
-- **Network Mode**: Backend dùng `host` network mode để tối đa hóa performance và giảm latency.
-- **Storage Persistence**: Qdrant data được lưu trên EBS volume (gp3) gắn cố định vào ECS Task.
+---
+
+## 🔄 Data Flow
+
+### 💬 Chat Flow
+```
+User nhắn tin
+    └─► POST /api/v1/chat/stream (SSE)
+            └─► ChatService._ensure_session() [DynamoDB]
+                    └─► ContextFilterPlugin (tóm tắt nếu > 22 msgs)
+                            └─► ADK Runner → Gemini 2.5-flash
+                                    ├─► read_wiki_index / read_wiki_page
+                                    ├─► search_documents (RAG — Qdrant)
+                                    ├─► retrieve_memories (mem0)
+                                    └─► ─── SSE stream tokens ──► Browser
+```
+
+### 📄 Upload PDF Flow
+```
+Upload PDF
+    └─► POST /api/v1/documents/upload
+            ├─► extract text → StorageBackend.save() [S3]
+            ├─► RAGService: chunk → embed → Qdrant upsert
+            ├─► Cache.delete("docs:{user_id}:list")
+            └─► [background] WikiService 4-phase pipeline
+                    ├─► Phase 1 MAP:    extract entities/topics (parallel)
+                    ├─► Phase 2 REDUCE: merge + deduplicate by slug
+                    ├─► Phase 3 SYNTH:  LLM synthesize per page → S3
+                    └─► Phase 4 FINAL:  rebuild index + link_index
+```
+
+### 🎙️ Transcription Flow
+```
+Start meeting → POST /transcription/start [DynamoDB]
+    │
+Audio stream → WS /transcription/audio/{meeting_id}
+    └─► SonioxService → Soniox STT → utterances → DynamoDB
+    │
+Stop meeting → POST /transcription/stop
+    ├─► TranscriptRAGService.ingest() [Qdrant]
+    └─► [background] WikiService.update_wiki_from_transcript()
+```
+
+### ⚡ Cache Strategy
+```
+Request đến API
+    │
+    ├─► Cache.get(key) ──► HIT  ──► Return cached data (< 1ms)
+    │
+    └─► MISS ──► Tính toán / DB query
+                    └─► Cache.set(key, data, ttl)
+                            └─► Return data
+
+TTL: wiki_page=10min | wiki_graph=2min | sessions=1min | docs=1min | user=5min
+```
 
 ---
 
-## 💻 Local Development
+## 🚀 Quickstart — Local Dev
 
-### Prerequisites
-- Python 3.11+ & [uv](https://docs.astral.sh/uv/)
-- Node.js 20+ & npm
-- Docker Desktop
-- API Keys: `GEMINI_API_KEY`, `SONIOX_API_KEY` (optional)
+### Yêu cầu
+- Docker & Docker Compose
+- Node.js 20+
+- Python 3.11+ với [uv](https://docs.astral.sh/uv/)
+- Google Gemini API Key
 
-### Quick Start with Docker (Recommended)
-Cách nhanh nhất để khởi chạy toàn bộ môi trường (Backend, Qdrant, DynamoDB Local):
-
+### 1. Clone & cấu hình
 ```bash
-# Clone repository
-git clone <repo-url>
-cd proj2
+git clone https://github.com/minh2004pd/chatbotfullpipeline.git
+cd chatbotfullpipeline
 
-# Cấu hình môi trường
-cp backend/.env.example backend/.env
-# Điền các API Key cần thiết vào backend/.env
+# Tạo file .env từ example
+cp .env.example .env
+# → Điền GEMINI_API_KEY và các biến cần thiết
+```
 
-# Khởi chạy dịch vụ
+### 2. Khởi động services
+```bash
+# Chạy toàn bộ: Redis, Qdrant, DynamoDB Local, Postgres, Backend
 docker compose up -d
-```
-- Backend API & Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
-- Frontend: [http://localhost:5173](http://localhost:5173) (sau khi chạy FE manual bên dưới)
 
-### Manual Setup
-
-#### Backend
-```bash
-cd backend
-uv sync
-uv run python -m app.main
+# Kiểm tra logs backend
+docker logs -f memrag-backend
 ```
 
-#### Frontend
+### 3. Chạy Frontend
 ```bash
 cd frontend
-npm ci
+npm install
 npm run dev
+# → http://localhost:5173
+```
+
+### 4. API Docs
+| URL | Mô tả |
+|-----|-------|
+| http://localhost:8000/docs | Swagger UI |
+| http://localhost:6333/dashboard | Qdrant Dashboard |
+| http://localhost:8001 | DynamoDB Local |
+
+---
+
+## 🧪 Testing
+
+```bash
+# Chạy toàn bộ test suite
+cd backend && uv run pytest
+
+# Với coverage report
+uv run pytest --cov=app --cov-report=term-missing
+
+# Chạy test cụ thể
+uv run pytest tests/services/test_wiki_service.py -v
+```
+
+**Test coverage:**
+| Module | Test file |
+|--------|-----------|
+| Wiki pipeline | `tests/services/test_wiki_service.py` |
+| Auth + JWT | `tests/core/test_auth.py` |
+| Session CRUD | `tests/services/test_dynamo_session_service.py` |
+| Cache Service | `tests/core/test_cache_service.py` |
+| RAG Service | `tests/services/test_rag_service.py` |
+
+---
+
+## 🔁 CI/CD Pipeline
+
+```
+git push origin main
+        │
+        ├── backend/** thay đổi?
+        │       │
+        │   ┌───▼──────────────┐   ┌──────────────────┐
+        │   │   JOB: lint      │   │   JOB: test      │  ← chạy song song
+        │   │  ruff format     │   │ pytest + coverage │
+        │   │  ruff check      │   │ upload artifact   │
+        │   └───────┬──────────┘   └────────┬─────────┘
+        │           └──────────┬────────────┘
+        │                      │ cả 2 pass
+        │            ┌─────────▼──────────┐
+        │            │  JOB: build-push   │  ← push main only
+        │            │  docker build      │
+        │            │  tag: <sha>+latest │
+        │            │  push → ECR        │
+        │            └─────────┬──────────┘
+        │                      │
+        │            ┌─────────▼──────────┐
+        │            │   JOB: deploy      │  ← environment: production
+        │            │  ECS rolling update│
+        │            │  wait stable ✓     │
+        │            └────────────────────┘
+        │
+        └── frontend/** thay đổi?
+                │
+            ┌───▼──────────────────────┐
+            │  JOB: validate           │
+            │  tsc --noEmit + eslint   │
+            └───────────┬──────────────┘
+                        │
+            ┌───────────▼──────────────┐
+            │  JOB: deploy             │
+            │  npm build               │
+            │  s3 sync (immutable)     │
+            │  CloudFront invalidate   │
+            └──────────────────────────┘
 ```
 
 ---
 
-## ⚙️ Environment Variables
+## ☁️ Infrastructure (AWS)
 
-Tạo file `backend/.env` với các nội dung chính sau:
+```
+AWS ap-southeast-2
+├── VPC (10.0.0.0/16)
+│   ├── Public Subnets  → ALB, NAT Gateway
+│   └── Private Subnets → ECS EC2, RDS, ElastiCache
+│
+├── ECS Cluster (EC2 launch type)
+│   └── Backend Task (FastAPI :8000)
+│
+├── Qdrant (ECS Fargate + EFS volume)
+│
+├── ALB → ECS Backend (port 8000)
+├── CloudFront → S3 (frontend) + ALB (/api/*)
+│
+├── RDS PostgreSQL (db.t3.micro) — Auth
+├── DynamoDB — Sessions + Meetings
+├── ElastiCache Redis (cache.t3.micro) — Caching
+├── S3 — Uploads + Wiki pages
+└── ECR — Docker images
+```
 
-| Biến | Mô tả |
-|------|-------|
-| `GEMINI_API_KEY` | API Key từ Google AI Studio |
-| `ALLOWED_ORIGINS` | JSON array, ví dụ: `["http://localhost:5173"]` |
-| `STORAGE_BACKEND` | `local` (mặc định) hoặc `s3` |
-| `QDRANT_URL` | Mặc định `http://localhost:6333` |
-| `DYNAMODB_ENDPOINT_URL` | Local: `http://localhost:8001`, Prod: bỏ trống |
-| `SONIOX_API_KEY` | Key cho tính năng Transcription thời gian thực |
-| `JWT_SECRET_KEY` | Secret dùng để sign token (quan trọng cho Prod) |
-
----
-
-## 🚀 CI/CD & Deployment
-
-Dự án sử dụng GitHub Actions với 2 workflows độc lập:
-
-1.  **Backend Pipeline (`ci-cd.yml`)**: 
-    - Trigger khi thay đổi code trong `backend/`.
-    - Flow: Lint → Test → Build Docker Image → Push ECR → Deploy ECS (Rolling update).
-2.  **Frontend Pipeline (`deploy-frontend.yml`)**:
-    - Trigger khi thay đổi code trong `frontend/`.
-    - Flow: Build React app → Sync S3 → Invalidate CloudFront cache.
-
-### Infrastructure as Code
-Toàn bộ hạ tầng được quản lý bằng **Terraform** trong thư mục `infrastructure/`.
-Để triển khai lần đầu:
+**Triển khai:**
 ```bash
 cd infrastructure
+
 terraform init
-terraform apply
+terraform plan    # kiểm tra trước
+terraform apply   # tạo hạ tầng (~10-15 phút)
+terraform output  # xem endpoints
 ```
 
----
-
-## 🔧 Troubleshooting
-
-Các vấn đề thường gặp khi vận hành trên AWS:
-
-- **EC2 Instance stopped**: Xảy ra khi cố gắng thay đổi instance type trên AWS account Free Tier.
-  - *Fix:* `aws ec2 start-instances --instance-ids <id> --region ap-southeast-2`
-- **Port 8000 conflict**: Do Backend dùng `host` network mode, nếu task cũ chưa cleanup xong, task mới sẽ fail.
-  - *Fix:* Force deployment hoặc restart ECS service để cleanup port.
-- **Qdrant Connection Timeout**: Backend khởi động nhanh hơn Qdrant hoặc Cloud Map DNS chưa cập nhật.
-  - *Fix:* Restart Backend service sau khi Qdrant đã ở trạng thái RUNNING.
-- **OOM Kill**: Qdrant hoặc Backend tiêu tốn quá nhiều RAM trên instance nhỏ.
-  - *Fix:* Đã cấu hình Swap 2GB trên EBS để giảm thiểu tình trạng này.
+**Outputs quan trọng:**
+| Output | Giá trị |
+|--------|---------|
+| `cloudfront_url` | URL frontend public |
+| `alb_dns_name` | Backend ALB endpoint |
+| `redis_primary_endpoint` | ElastiCache Redis |
+| `rds_endpoint` | PostgreSQL host |
 
 ---
 
-## 📚 Tài liệu chi tiết
+## 📁 Cấu trúc dự án
 
-Để tìm hiểu sâu hơn về hệ thống, vui lòng tham khảo các tài liệu sau trong thư mục `docs/`:
-
-- **[System Specification](file:///home/minhdd/pet_proj_v2/pet_proj/proj2/docs/spec.md)** — Đặc tả kỹ thuật và kiến trúc hiện tại.
-- **[Testing Strategy](file:///home/minhdd/pet_proj_v2/pet_proj/proj2/docs/testing.md)** — Hướng dẫn kiểm thử và Mocking.
-- **[Deployment Plan](file:///home/minhdd/pet_proj_v2/pet_proj/proj2/docs/deploy_plan.md)** — Kiến trúc AWS và hướng dẫn deploy.
-- **[Wiki Knowledge Base](file:///home/minhdd/pet_proj_v2/pet_proj/proj2/docs/wiki.md)** — Cơ chế tự động tổng hợp kiến thức.
-- **[Multi-Agent Architecture](file:///home/minhdd/pet_proj_v2/pet_proj/proj2/docs/multi-agent-architecture.md)** — Chi tiết về luồng xử lý của AI Agent.
-- **[Data Isolation](file:///home/minhdd/pet_proj_v2/pet_proj/proj2/docs/memory.md)** — Cách hệ thống đảm bảo an toàn dữ liệu giữa các người dùng.
+```
+.
+├── backend/                  # FastAPI + Google ADK
+│   ├── app/
+│   │   ├── agents/           # ADK Agent + 9 Tools
+│   │   ├── api/v1/           # REST endpoints
+│   │   ├── core/             # Config, Cache, DB, DI
+│   │   ├── repositories/     # Data access layer
+│   │   ├── services/         # Business logic
+│   │   └── schemas/          # Pydantic models
+│   ├── tests/                # pytest (~40 test files)
+│   ├── Dockerfile
+│   └── pyproject.toml
+│
+├── frontend/                 # React 18 + Vite + TypeScript
+│   └── src/
+│       ├── api/              # Axios clients
+│       ├── components/       # UI components
+│       ├── hooks/            # React Query hooks
+│       ├── store/            # Zustand state
+│       └── types/            # TypeScript types
+│
+├── infrastructure/           # Terraform (AWS)
+│   ├── ecs.tf                # ECS cluster + task def
+│   ├── rds.tf                # PostgreSQL
+│   ├── elasticache.tf        # Redis
+│   ├── dynamodb.tf           # Sessions + Meetings
+│   ├── s3_frontend.tf        # Frontend hosting
+│   ├── alb.tf                # Load balancer
+│   └── variables.tf          # Input variables
+│
+├── docs/                     # Documentation
+│   ├── codebase.md           # Kiến trúc chi tiết
+│   ├── spec.md               # Product specification
+│   ├── wiki.md               # Wiki system design
+│   └── cicd-flow.md          # CI/CD flow
+│
+├── .github/workflows/
+│   ├── ci-cd.yml             # Backend CI/CD
+│   └── deploy-frontend.yml   # Frontend deploy
+│
+└── docker-compose.yml        # Local dev stack
+```
 
 ---
 
 ## 🛠️ Development Rules
 
-Để đảm bảo tính ổn định và chất lượng của hệ thống, mọi đóng góp code cần tuân thủ:
+Để đảm bảo chất lượng và deploy mượt mà:
 
-1.  **Chạy Full Test Suite**: Trước khi hoàn thành bất kỳ bug fix hoặc tính năng mới nào, phải chạy toàn bộ hệ thống test (`cd backend && uv run pytest`).
-2.  **Bổ sung Test Case**: Các tính năng mới phải có các test case tương ứng để đảm bảo độ bao phủ (coverage).
-3.  **Cập nhật Tài liệu**: Mọi thay đổi quan trọng phải được phản ánh trong thư mục `docs/`, `CLAUDE.md` và `README.md`.
+1. **🧪 Chạy full test suite** trước khi hoàn thành bất kỳ task nào:
+   ```bash
+   cd backend && uv run pytest
+   ```
+2. **📝 Bổ sung test case** cho mọi tính năng mới (unit + integration).
+3. **📚 Cập nhật docs** — `docs/`, `CLAUDE.md`, `README.md` khi thay đổi kiến trúc.
+4. **🎨 Format code** trước khi commit:
+   ```bash
+   cd backend && uv run ruff format .
+   ```
 
 ---
 
-## 📁 Project Structure
+## 🌐 Environment Variables
 
-```text
-.
-├── backend/            # FastAPI App, ADK Agents, RAG Logic
-├── frontend/           # React SPA, Zustand, React Flow
-├── infrastructure/     # Terraform (AWS Resources)
-├── docs/               # Detailed documentation (Deploy, CI/CD, Specs)
-├── .github/workflows/  # CI/CD Automation
-└── docker-compose.yml  # Local development stack
-```
+| Biến | Bắt buộc | Mô tả |
+|------|----------|-------|
+| `GEMINI_API_KEY` | ✅ | Google Gemini API key |
+| `JWT_SECRET_KEY` | ✅ (prod) | JWT signing secret (32+ chars) |
+| `STORAGE_BACKEND` | — | `local` hoặc `s3` (default: `local`) |
+| `S3_BUCKET` | ✅ (nếu S3) | Tên S3 bucket |
+| `S3_ACCESS_KEY_ID` | ✅ (nếu S3) | AWS Access Key |
+| `S3_SECRET_ACCESS_KEY` | ✅ (nếu S3) | AWS Secret Key |
+| `QDRANT_URL` | — | Qdrant server URL |
+| `REDIS_URL` | — | Redis connection URL |
+| `REDIS_ENABLED` | — | Bật/tắt cache (default: `true`) |
+| `DATABASE_URL` | — | PostgreSQL connection string |
+| `SONIOX_API_KEY` | — | Soniox STT API key |
+| `WIKI_ENABLED` | — | Bật/tắt wiki pipeline (default: `true`) |
+| `DEBUG` | — | Dev mode — bỏ qua JWT (`true`/`false`) |
 
 ---
 
 ## 📄 License
-MIT
+
+MIT © 2026 minh2004pd
