@@ -1119,7 +1119,11 @@ async def test_assess_summary_relevance_returns_should_update_true(service):
     from unittest.mock import patch as _patch
 
     llm_resp = json.dumps(
-        {"should_update": True, "matched_slugs": ["lora", "peft"], "reason": "Technical facts found"}
+        {
+            "should_update": True,
+            "matched_slugs": ["lora", "peft"],
+            "reason": "Technical facts found",
+        }
     )
     mock_resp = MagicMock()
     mock_resp.text = llm_resp
@@ -1144,9 +1148,7 @@ async def test_assess_summary_relevance_returns_should_update_false(service):
     import json
     from unittest.mock import patch as _patch
 
-    llm_resp = json.dumps(
-        {"should_update": False, "matched_slugs": [], "reason": "Chitchat only"}
-    )
+    llm_resp = json.dumps({"should_update": False, "matched_slugs": [], "reason": "Chitchat only"})
     mock_resp = MagicMock()
     mock_resp.text = llm_resp
 

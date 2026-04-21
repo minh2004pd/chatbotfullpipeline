@@ -177,12 +177,14 @@ class TestReceiverLoopEndpointDetection:
         svc = SonioxService()
 
         messages = [
-            json.dumps({
-                "tokens": [
-                    {"text": "Hello", "is_final": True, "translation_status": "original"},
-                    {"text": "<end>", "is_final": True},
-                ],
-            }),
+            json.dumps(
+                {
+                    "tokens": [
+                        {"text": "Hello", "is_final": True, "translation_status": "original"},
+                        {"text": "<end>", "is_final": True},
+                    ],
+                }
+            ),
             json.dumps({"finished": True}),
         ]
 
@@ -215,12 +217,14 @@ class TestReceiverLoopEndpointDetection:
         svc = SonioxService()
 
         messages = [
-            json.dumps({
-                "tokens": [
-                    {"text": "Test", "is_final": True, "translation_status": "original"},
-                    {"text": "<end>", "is_final": True},
-                ],
-            }),
+            json.dumps(
+                {
+                    "tokens": [
+                        {"text": "Test", "is_final": True, "translation_status": "original"},
+                        {"text": "<end>", "is_final": True},
+                    ],
+                }
+            ),
             json.dumps({"finished": True}),
         ]
 
@@ -255,11 +259,13 @@ class TestReceiverLoopPartialAndFinal:
         svc = SonioxService()
 
         messages = [
-            json.dumps({
-                "tokens": [
-                    {"text": "Hel", "is_final": False, "translation_status": "none"},
-                ],
-            }),
+            json.dumps(
+                {
+                    "tokens": [
+                        {"text": "Hel", "is_final": False, "translation_status": "none"},
+                    ],
+                }
+            ),
             json.dumps({"finished": True}),
         ]
 
@@ -290,11 +296,13 @@ class TestReceiverLoopPartialAndFinal:
         svc = SonioxService()
 
         messages = [
-            json.dumps({
-                "tokens": [
-                    {"text": "Done", "is_final": True, "translation_status": "original"},
-                ],
-            }),
+            json.dumps(
+                {
+                    "tokens": [
+                        {"text": "Done", "is_final": True, "translation_status": "original"},
+                    ],
+                }
+            ),
             json.dumps({"finished": True}),
         ]
 
@@ -353,12 +361,24 @@ class TestReceiverLoopTranslation:
         svc = SonioxService()
 
         messages = [
-            json.dumps({
-                "tokens": [
-                    {"text": "Hello", "is_final": False, "translation_status": "original", "language": "en"},
-                    {"text": " Xin chào", "is_final": False, "translation_status": "translation", "language": "vi"},
-                ],
-            }),
+            json.dumps(
+                {
+                    "tokens": [
+                        {
+                            "text": "Hello",
+                            "is_final": False,
+                            "translation_status": "original",
+                            "language": "en",
+                        },
+                        {
+                            "text": " Xin chào",
+                            "is_final": False,
+                            "translation_status": "translation",
+                            "language": "vi",
+                        },
+                    ],
+                }
+            ),
             json.dumps({"finished": True}),
         ]
 

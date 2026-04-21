@@ -84,12 +84,12 @@ class Settings(BaseSettings):
     # Redis cache
     redis_url: str = "redis://localhost:6379/0"
     redis_enabled: bool = True
-    redis_default_ttl: int = 300   # 5 phút default
-    redis_wiki_ttl: int = 600      # 10 phút cho wiki pages
-    redis_user_ttl: int = 300      # 5 phút cho auth user lookup
-    redis_graph_ttl: int = 120     # 2 phút cho wiki graph (expensive)
-    redis_session_list_ttl: int = 60   # 1 phút cho session list
-    redis_docs_list_ttl: int = 60      # 1 phút cho document list
+    redis_default_ttl: int = 300  # 5 phút default
+    redis_wiki_ttl: int = 600  # 10 phút cho wiki pages
+    redis_user_ttl: int = 300  # 5 phút cho auth user lookup
+    redis_graph_ttl: int = 120  # 2 phút cho wiki graph (expensive)
+    redis_session_list_ttl: int = 60  # 1 phút cho session list
+    redis_docs_list_ttl: int = 60  # 1 phút cho document list
 
     # PostgreSQL (auth)
     database_url: str = "postgresql+asyncpg://memrag:memrag@localhost:5432/memrag"
