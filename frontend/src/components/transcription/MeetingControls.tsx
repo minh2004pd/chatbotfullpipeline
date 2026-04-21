@@ -1,9 +1,10 @@
 import React from 'react'
-import { Mic, Monitor, Layers, Square, Circle } from 'lucide-react'
+import { Mic, Monitor, Layers, Square, Circle, Loader2 } from 'lucide-react'
 import type { AudioSource } from '@/types'
 
 interface MeetingControlsProps {
   isRecording: boolean
+  isStopping?: boolean
   selectedSource: AudioSource
   onSourceChange: (source: AudioSource) => void
   onStart: () => void
@@ -23,6 +24,7 @@ const SOURCE_OPTIONS: { value: AudioSource; label: string; icon: React.ReactNode
 
 export default function MeetingControls({
   isRecording,
+  isStopping,
   selectedSource,
   onSourceChange,
   onStart,
@@ -81,8 +83,16 @@ export default function MeetingControls({
         <span className="text-xs text-[#888]">Auto-translate</span>
       </label>
 
-      {/* Start / Stop button */}
-      {isRecording ? (
+      {/* Start / Stop / Processing button */}
+      {isStopping ? (
+        <button
+          disabled
+          className="flex items-center justify-center gap-2 py-2 rounded-md bg-amber-700/50 text-amber-200 text-sm font-medium cursor-wait"
+        >
+          <Loader2 size={14} className="animate-spin" />
+          Đang xử lý bản ghi...
+        </button>
+      ) : isRecording ? (
         <button
           onClick={onStop}
           className="flex items-center justify-center gap-2 py-2 rounded-md bg-red-700 hover:bg-red-600 text-white text-sm font-medium transition-colors"

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c ':*)",
+      "Bash(aws ecs describe-services:*)",
+      "Bash(cd /home/minhdd/pet_proj/proj2/backend && uv run pytest:*)",
+      "Bash(cd /home/minhdd/pet_proj/proj2/backend && uv run ruff:*)",
+      "Bash(cd /home/minhdd/pet_proj/proj2/frontend && npm run lint:*)",
+      "Bash(cd /home/minhdd/pet_proj/proj2/scripts && python3 qa_check.py:*)"
+    ]
+  }
+}

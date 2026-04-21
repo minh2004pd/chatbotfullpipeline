@@ -14,6 +14,7 @@ interface UseTranscriptionOptions {
 
 export function useTranscription({ userId }: UseTranscriptionOptions) {
   const [isRecording, setIsRecording] = useState(false)
+  const [isStopping, setIsStopping] = useState(false)
   const [meetingId, setMeetingId] = useState<string | null>(null)
   const [liveUtterances, setLiveUtterances] = useState<LiveUtterance[]>([])
   const [partialText, setPartialText] = useState('')
@@ -49,6 +50,8 @@ export function useTranscription({ userId }: UseTranscriptionOptions) {
     const mid = meetingIdRef.current
     if (!mid) return
 
+    setIsStopping(true)
+
     // 1. Dừng audio capture
     captureServiceRef.current?.stop()
     captureServiceRef.current = null
@@ -64,12 +67,14 @@ export function useTranscription({ userId }: UseTranscriptionOptions) {
     setPartialText('')
     setPartialTranslation('')
 
-    // 3. Báo backend stop (fire-and-forget nếu session đã expired)
+    // 3. Báo backend stop — chờ finalize xong
     try {
       await stopTranscription(mid, userId)
     } catch (e) {
       console.error('Stop transcription error', e)
     }
+
+    setIsStopping(false)
 
     // Refresh meetings list
     fetchMeetings()
@@ -161,21 +166,35 @@ export function useTranscription({ userId }: UseTranscriptionOptions) {
   function handleTranscriptionEvent(event: TranscriptionEvent) {
     if (event.type === 'partial') {
       const text = event.tokens.map((t) => t.text).join('')
-      setPartialText(text)
-      setPartialTranslation(event.translation ?? '')
+      // Nếu Soniox gửi translation trong cùng message → hiện translation làm chính
+      const translation = event.translation ?? ''
+      setPartialText(translation || text)
+      setPartialTranslation(translation ? text : '')
     } else if (event.type === 'final') {
       const text = event.tokens.map((t) => t.text).join('').trim()
       if (!text) return
       const speakerNum = event.tokens[0]?.speaker ?? 0
-      setLiveUtterances((prev) => [
-        ...prev,
-        {
-          speaker: `speaker_${speakerNum}`,
-          text,
-          translation: event.translation,
-          isFinal: true,
-        },
-      ])
+      const speaker = `speaker_${speakerNum}`
+      const translation = event.translation
+
+      setLiveUtterances((prev) => {
+        // Nếu backend gửi kèm translation → tạo utterance bình thường
+        if (translation) {
+          return [...prev, { speaker, text, translation, isFinal: true }]
+        }
+
+        // Soniox gửi translation thành message riêng → merge với utterance trước
+        if (prev.length > 0) {
+          const last = prev[prev.length - 1]
+          if (last.speaker === speaker && !last.translation && last.text !== text) {
+            const updated = [...prev]
+            updated[updated.length - 1] = { ...last, translation: text }
+            return updated
+          }
+        }
+
+        return [...prev, { speaker, text, translation: undefined, isFinal: true }]
+      })
       setPartialText('')
       setPartialTranslation('')
     } else if (event.type === 'error') {
@@ -193,6 +212,7 @@ export function useTranscription({ userId }: UseTranscriptionOptions) {
 
   return {
     isRecording,
+    isStopping,
     meetingId,
     liveUtterances,
     partialText,

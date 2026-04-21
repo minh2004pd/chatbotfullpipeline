@@ -36,11 +36,12 @@ export default function TranscriptionPanel() {
   const [enableTranslation, setEnableTranslation] = useState(true)
   const [showMeetings, setShowMeetings] = useState(true)
   const [expandedMeeting, setExpandedMeeting] = useState<string | null>(null)
-  const [transcriptData, setTranscriptData] = useState<Record<string, { text: string }[]>>({})
+  const [transcriptData, setTranscriptData] = useState<Record<string, { speaker?: string; text: string; translated_text?: string }[]>>({})
   const liveEndRef = useRef<HTMLDivElement>(null)
 
   const {
     isRecording,
+    isStopping,
     liveUtterances,
     partialText,
     partialTranslation,
@@ -84,11 +85,32 @@ export default function TranscriptionPanel() {
     if (!transcriptData[meeting.meeting_id]) {
       try {
         const data = await getMeetingTranscript(meeting.meeting_id, userId)
+        const raw = data.utterances.map((u) => ({
+          speaker: u.speaker,
+          text: u.text,
+          translated_text: u.translated_text,
+        }))
+        // Soniox lưu original + translation thành 2 utterances riêng →
+        // merge: nếu utterance kế tiếp cùng speaker và không có translated_text,
+        // coi nó là bản dịch của utterance trước.
+        const merged: typeof raw = []
+        for (const u of raw) {
+          const last = merged[merged.length - 1]
+          if (
+            last &&
+            last.speaker === u.speaker &&
+            !last.translated_text &&
+            !u.translated_text &&
+            last.text !== u.text
+          ) {
+            merged[merged.length - 1] = { ...last, translated_text: u.text }
+          } else {
+            merged.push(u)
+          }
+        }
         setTranscriptData((prev) => ({
           ...prev,
-          [meeting.meeting_id]: data.utterances.map((u) => ({
-            text: `[${u.speaker}] ${u.text}${u.translated_text ? ` → ${u.translated_text}` : ''}`,
-          })),
+          [meeting.meeting_id]: merged,
         }))
       } catch {
         // ignore
@@ -113,12 +135,17 @@ export default function TranscriptionPanel() {
       <div className="flex items-center gap-2 px-4 py-3 border-b border-[#2e2e2e] flex-shrink-0 bg-[#0f0f0f]/80">
         <Mic size={16} className="text-violet-400" />
         <span className="text-sm font-medium text-[#a0a0a0]">Realtime Transcription</span>
-        {isRecording && (
+        {isStopping ? (
+          <span className="ml-2 flex items-center gap-1.5 text-xs text-amber-400">
+            <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+            Đang xử lý...
+          </span>
+        ) : isRecording ? (
           <span className="ml-2 flex items-center gap-1.5 text-xs text-red-400">
             <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
             Recording
           </span>
-        )}
+        ) : null}
       </div>
 
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
@@ -126,6 +153,7 @@ export default function TranscriptionPanel() {
         <div className="px-3 pt-3 pb-2 flex-shrink-0">
           <MeetingControls
             isRecording={isRecording}
+            isStopping={isStopping}
             selectedSource={source}
             onSourceChange={setSource}
             onStart={handleStart}
@@ -138,8 +166,18 @@ export default function TranscriptionPanel() {
           />
         </div>
 
+        {/* Processing banner */}
+        {isStopping && (
+          <div className="mx-3 mb-2 flex-shrink-0 bg-amber-900/20 border border-amber-700/40 rounded-lg px-3 py-2.5 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse flex-shrink-0" />
+            <span className="text-xs text-amber-300">
+              Đang xử lý bản ghi — vui lòng đợi Soniox finalize...
+            </span>
+          </div>
+        )}
+
         {/* Live transcript */}
-        {isRecording && (
+        {(isRecording || isStopping) && (
           <div className="mx-3 mb-2 flex-shrink-0 max-h-60 overflow-y-auto bg-[#131313] rounded-lg border border-[#2e2e2e] p-3">
             <p className="text-xs text-[#555] mb-2 uppercase tracking-wider">Live</p>
             {liveUtterances.map((u, i) => (
@@ -147,20 +185,30 @@ export default function TranscriptionPanel() {
                 <span className={`text-xs font-semibold mr-1.5 ${speakerColor(u.speaker)}`}>
                   {u.speaker}:
                 </span>
-                <span className="text-sm text-[#e0e0e0]">{u.text}</span>
-                {u.translation && (
-                  <span className="block text-xs text-[#666] italic ml-0 mt-0.5 pl-2 border-l border-[#333]">
-                    {u.translation}
-                  </span>
+                {u.translation ? (
+                  <>
+                    <span className="text-sm text-[#e0e0e0]">{u.translation}</span>
+                    <span className="block text-xs text-[#555] italic mt-0.5 pl-2 border-l border-[#333]">
+                      {u.text}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-sm text-[#e0e0e0]">{u.text}</span>
                 )}
               </div>
             ))}
             {partialText && (
               <div className="opacity-60">
                 <span className="text-xs text-[#555] mr-1.5">...</span>
-                <span className="text-sm text-[#bbb]">{partialText}</span>
+                {partialTranslation ? (
+                  <span className="text-sm text-[#bbb]">{partialTranslation}</span>
+                ) : (
+                  <span className="text-sm text-[#bbb]">{partialText}</span>
+                )}
                 {partialTranslation && (
-                  <span className="block text-xs text-[#555] italic ml-2">{partialTranslation}</span>
+                  <span className="block text-xs text-[#555] italic mt-0.5 pl-2 border-l border-[#333]">
+                    {partialText}
+                  </span>
                 )}
               </div>
             )}
@@ -224,9 +272,21 @@ export default function TranscriptionPanel() {
                         {transcriptData[m.meeting_id] ? (
                           <div className="max-h-48 overflow-y-auto space-y-1 pt-1">
                             {transcriptData[m.meeting_id].map((u, i) => (
-                              <p key={i} className="text-xs text-[#bbb] leading-relaxed">
-                                {u.text}
-                              </p>
+                              <div key={i} className="text-xs leading-relaxed">
+                                <span className={`font-semibold mr-1 ${speakerColor(u.speaker ?? 'speaker_0')}`}>
+                                  {u.speaker}:
+                                </span>
+                                {u.translated_text ? (
+                                  <>
+                                    <span className="text-[#e0e0e0]">{u.translated_text}</span>
+                                    <span className="block text-[#555] italic pl-2 border-l border-[#333] mt-0.5">
+                                      {u.text}
+                                    </span>
+                                  </>
+                                ) : (
+                                  <span className="text-[#e0e0e0]">{u.text}</span>
+                                )}
+                              </div>
                             ))}
                           </div>
                         ) : (

@@ -183,12 +183,16 @@ class SonioxService:
                 if not tokens:
                     continue  # periodic heartbeat với tokens rỗng, bỏ qua
 
+                # Extract translation từ Soniox response
+                translated_tokens: list[dict] = raw.get("translated_tokens", [])
+                translation_text = "".join(t.get("text", "") for t in translated_tokens).strip()
+
                 has_final = any(t.get("is_final") for t in tokens)
 
                 if has_final:
                     # Lưu utterance
                     if session:
-                        utterance = self._build_utterance(meeting_id, tokens, session)
+                        utterance = self._build_utterance(meeting_id, tokens, session, translation_text)
                         session.utterances.append(utterance)
                         session.seq += 1
                     normalized = {
@@ -203,6 +207,7 @@ class SonioxService:
                             for t in tokens
                             if t.get("is_final")
                         ],
+                        "translation": translation_text or None,
                     }
                 else:
                     normalized = {
@@ -211,6 +216,7 @@ class SonioxService:
                         "tokens": [
                             {"text": t.get("text", ""), "speaker": t.get("speaker")} for t in tokens
                         ],
+                        "translation": translation_text or None,
                     }
 
                 await queue.put(normalized)
@@ -224,7 +230,9 @@ class SonioxService:
             await queue.put({"type": "end", "meeting_id": meeting_id})
 
     @staticmethod
-    def _build_utterance(meeting_id: str, tokens: list[dict], session: "_SonioxSession") -> dict:
+    def _build_utterance(
+        meeting_id: str, tokens: list[dict], session: "_SonioxSession", translation: str | None = None
+    ) -> dict:
         final_tokens = [t for t in tokens if t.get("is_final")]
         text = "".join(t.get("text", "") for t in final_tokens).strip()
         # Soniox v2: speaker là string (ví dụ "A", "B") thay vì int
@@ -237,7 +245,7 @@ class SonioxService:
             "seq": session.seq,
             "speaker": speaker,
             "text": text,
-            "translated_text": None,  # Translation v2 cần xử lý riêng
+            "translated_text": translation or None,
             "start_ms": final_tokens[0].get("start_ms") if final_tokens else None,
             "end_ms": final_tokens[-1].get("end_ms") if final_tokens else None,
         }

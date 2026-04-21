@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Menu, X, Mic, Network } from 'lucide-react'
+import { Menu, X, Network } from 'lucide-react'
 import Sidebar from './Sidebar'
 import ChatWindow from '@/components/chat/ChatWindow'
 import ToastContainer from '@/components/ui/ToastContainer'
@@ -111,22 +111,19 @@ export default function AppLayout() {
             </button>
           </div>
 
-          <button
-            onClick={() => setTranscriptionOpen((v) => !v)}
-            className={`p-1.5 rounded-md transition-colors ${
-              transcriptionOpen
-                ? 'text-violet-400 bg-violet-900/30'
-                : 'text-[#666] hover:text-[#f1f1f1] hover:bg-[#2a2a2a]'
-            }`}
-            title="Toggle transcription panel"
-          >
-            <Mic size={18} />
-          </button>
+          {/* Mic removed from header — now in chat input bar */}
         </header>
 
         {/* Main view */}
         <div className="flex-1 min-h-0">
-          {mainView === 'chat' ? <ChatWindow /> : <WikiGraphPanel />}
+          {mainView === 'chat' ? (
+            <ChatWindow
+              transcriptionOpen={transcriptionOpen}
+              onToggleTranscription={() => setTranscriptionOpen((v) => !v)}
+            />
+          ) : (
+            <WikiGraphPanel />
+          )}
         </div>
       </main>
 

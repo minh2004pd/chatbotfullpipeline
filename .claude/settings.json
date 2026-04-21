@@ -6,25 +6,30 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -c \"import sys,json; d=json.load(sys.stdin); print(d.get('tool_input',{}).get('file_path','') or d.get('tool_response',{}).get('filePath',''))\" | { read -r f; [[ \"$f\" == *.py ]] && cd /home/minhdd/pet_proj/proj2/backend && uv run ruff format \"$f\"; } 2>/dev/null || true",
+            "command": "python3 -c \"import sys,json; d=json.load(sys.stdin); print(d.get('tool_input',{}).get('file_path','') or d.get('tool_response',{}).get('filePath',''))\" | { read -r f; [[ \"$f\" == *.py ]] && cd backend && uv run ruff format \"$f\"; } 2>/dev/null || true",
             "timeout": 15,
             "statusMessage": "Formatting with ruff..."
           },
           {
             "type": "command",
-            "command": "python3 -c \"import sys,json; d=json.load(sys.stdin); print(d.get('tool_input',{}).get('file_path','') or d.get('tool_response',{}).get('filePath',''))\" | { read -r f; [[ \"$f\" == *.ts || \"$f\" == *.tsx ]] && [[ \"$f\" == */frontend/* ]] && cd /home/minhdd/pet_proj/proj2/frontend && npx eslint --fix \"$f\"; } 2>/dev/null || true",
+            "command": "python3 -c \"import sys,json; d=json.load(sys.stdin); print(d.get('tool_input',{}).get('file_path','') or d.get('tool_response',{}).get('filePath',''))\" | { read -r f; [[ \"$f\" == *.ts || \"$f\" == *.tsx ]] && [[ \"$f\" == *frontend/* ]] && cd frontend && npx eslint --fix \"$f\"; } 2>/dev/null || true",
             "timeout": 20,
             "statusMessage": "Linting with ESLint..."
           }
         ]
       }
     ],
-    "OnTaskComplete": [
+    "TaskCompleted": [
       {
-        "type": "command",
-        "command": "cd /home/minhdd/pet_proj/proj2/backend && uv run pytest tests/ --tb=short -q",
-        "timeout": 120,
-        "statusMessage": "Running tests after task completion..."
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd backend && uv run pytest tests/ --tb=short -q",
+            "timeout": 120,
+            "statusMessage": "Running tests after task completion..."
+          }
+        ]
       }
     ]
   }

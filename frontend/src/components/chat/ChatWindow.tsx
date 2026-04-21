@@ -1,10 +1,15 @@
 import { useEffect, useRef } from 'react'
-import { Bot, Sparkles } from 'lucide-react'
+import { Bot, Sparkles, Mic, Network } from 'lucide-react'
 import { useChat } from '@/hooks/useChat'
 import MessageBubble from './MessageBubble'
 import MessageInput from './MessageInput'
 
-export default function ChatWindow() {
+interface ChatWindowProps {
+  transcriptionOpen?: boolean
+  onToggleTranscription?: () => void
+}
+
+export default function ChatWindow({ transcriptionOpen, onToggleTranscription }: ChatWindowProps) {
   const { messages, isStreaming, sendMessage, stopStreaming } = useChat()
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -42,6 +47,8 @@ export default function ChatWindow() {
           onSend={sendMessage}
           onStop={stopStreaming}
           isStreaming={isStreaming}
+          transcriptionOpen={transcriptionOpen}
+          onToggleTranscription={onToggleTranscription}
         />
       </div>
     </div>
@@ -58,11 +65,11 @@ function WelcomeScreen() {
         Welcome to MemRAG
       </h2>
       <p className="text-[#666] text-sm max-w-md leading-relaxed mb-6">
-        An AI assistant with long-term memory and document understanding. Upload
-        PDFs in the sidebar, then ask questions about them. Your conversations
-        are remembered across sessions.
+        An AI research assistant with long-term memory, document understanding,
+        and voice transcription. Upload PDFs in the sidebar, record meetings,
+        and ask questions — your conversations are remembered across sessions.
       </p>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full max-w-lg">
+      <div className="flex flex-wrap justify-center gap-3 w-full max-w-xl">
         {[
           {
             icon: <Sparkles size={14} />,
@@ -79,10 +86,20 @@ function WelcomeScreen() {
             title: 'Multimodal',
             desc: 'Send images alongside your messages',
           },
+          {
+            icon: <Mic size={14} />,
+            title: 'Voice Transcription',
+            desc: 'Record meetings & search transcripts',
+          },
+          {
+            icon: <Network size={14} />,
+            title: 'Knowledge Wiki',
+            desc: 'Auto-generated wiki from your documents',
+          },
         ].map((item) => (
           <div
             key={item.title}
-            className="bg-[#1a1a1a] border border-[#2e2e2e] rounded-xl p-3 text-left"
+            className="bg-[#1a1a1a] border border-[#2e2e2e] rounded-xl p-3 text-left w-[calc(50%-6px)] sm:w-[calc(33.333%-8px)]"
           >
             <div className="flex items-center gap-1.5 text-violet-400 mb-1.5">
               {item.icon}

@@ -6,7 +6,7 @@ import {
   type ClipboardEvent,
   type KeyboardEvent,
 } from 'react'
-import { Send, Square, ImagePlus, X, Loader2 } from 'lucide-react'
+import { Send, Square, ImagePlus, X, Loader2, Mic } from 'lucide-react'
 
 interface Props {
   onSend: (
@@ -17,11 +17,13 @@ interface Props {
   ) => void
   onStop: () => void
   isStreaming: boolean
+  transcriptionOpen?: boolean
+  onToggleTranscription?: () => void
 }
 
 const ACCEPTED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
 
-export default function MessageInput({ onSend, onStop, isStreaming }: Props) {
+export default function MessageInput({ onSend, onStop, isStreaming, transcriptionOpen, onToggleTranscription }: Props) {
   const [text, setText] = useState('')
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
@@ -177,6 +179,21 @@ export default function MessageInput({ onSend, onStop, isStreaming }: Props) {
           className="hidden"
           onChange={handleImageSelect}
         />
+
+        {/* Mic / Voice transcription toggle */}
+        {onToggleTranscription && (
+          <button
+            onClick={onToggleTranscription}
+            className={`flex-shrink-0 p-1.5 transition-colors rounded-lg mb-0.5 ${
+              transcriptionOpen
+                ? 'text-violet-400 bg-violet-900/30'
+                : 'text-[#555] hover:text-[#a0a0a0] hover:bg-[#2a2a2a]'
+            }`}
+            title={transcriptionOpen ? 'Close transcription panel' : 'Open voice transcription'}
+          >
+            <Mic size={17} />
+          </button>
+        )}
 
         {/* Textarea */}
         <textarea
