@@ -35,6 +35,15 @@ from app.core.database_auth import get_db
 from app.core.security import decode_token
 from app.core.storages import StorageBackend, get_storage
 from app.models.user import User
+from app.repositories.mem0_repo import Mem0Repository
+from app.repositories.qdrant_repo import QdrantRepository
+from app.repositories.wiki_repo import WikiRepository
+from app.services.chat_service import ChatService
+from app.services.document_service import DocumentService
+from app.services.dynamo_session_service import DynamoDBSessionService
+from app.services.memory_service import MemoryService
+from app.services.rag_service import RAGService
+from app.services.wiki_service import WikiService
 
 _USER_CACHE_FIELDS = (
     "id",
@@ -57,15 +66,7 @@ def _user_from_cache(data: dict) -> User:
         if field in data:
             setattr(u, field, data[field])
     return u
-from app.repositories.mem0_repo import Mem0Repository
-from app.repositories.qdrant_repo import QdrantRepository
-from app.repositories.wiki_repo import WikiRepository
-from app.services.chat_service import ChatService
-from app.services.document_service import DocumentService
-from app.services.dynamo_session_service import DynamoDBSessionService
-from app.services.memory_service import MemoryService
-from app.services.rag_service import RAGService
-from app.services.wiki_service import WikiService
+
 
 # --- Auth ---
 

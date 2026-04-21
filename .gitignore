@@ -56,3 +56,4 @@ docker-compose.override.yml
 node_modules/
 dist/
 .cache/
+backend/wiki/
