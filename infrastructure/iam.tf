@@ -192,3 +192,24 @@ resource "aws_iam_role_policy" "ecs_task_dynamodb" {
     }]
   })
 }
+
+resource "aws_iam_role_policy" "ecs_task_s3" {
+  name = "${var.project_name}-ecs-task-s3"
+  role = aws_iam_role.ecs_task_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = ["arn:aws:s3:::${var.s3_bucket}"]
+      },
+      {
+        Effect = "Allow"
+        Action = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+        Resource = ["arn:aws:s3:::${var.s3_bucket}/*"]
+      },
+    ]
+  })
+}

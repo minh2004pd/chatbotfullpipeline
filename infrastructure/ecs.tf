@@ -68,8 +68,6 @@ resource "aws_ecs_task_definition" "backend" {
 
       secrets = [
         { name = "GEMINI_API_KEY", valueFrom = aws_ssm_parameter.gemini_api_key.arn },
-        { name = "S3_ACCESS_KEY_ID", valueFrom = aws_ssm_parameter.s3_access_key_id.arn },
-        { name = "S3_SECRET_ACCESS_KEY", valueFrom = aws_ssm_parameter.s3_secret_access_key.arn },
         { name = "SONIOX_API_KEY", valueFrom = aws_ssm_parameter.soniox_api_key.arn },
         { name = "JWT_SECRET_KEY", valueFrom = aws_ssm_parameter.jwt_secret_key.arn },
         # RDS PostgreSQL password from SSM
@@ -176,8 +174,6 @@ resource "aws_iam_role_policy" "ecs_task_ssm" {
       Action = ["ssm:GetParameters"]
       Resource = [
         aws_ssm_parameter.gemini_api_key.arn,
-        aws_ssm_parameter.s3_access_key_id.arn,
-        aws_ssm_parameter.s3_secret_access_key.arn,
         aws_ssm_parameter.soniox_api_key.arn,
         aws_ssm_parameter.jwt_secret_key.arn,
         aws_ssm_parameter.db_password.arn,
