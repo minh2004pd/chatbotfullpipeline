@@ -124,9 +124,10 @@ prompts:
     Chỉ [a-z0-9], không gạch ngang, không dấu, tối đa 60 ký tự.
     "Nguyễn Thị Lan" → "nguyenthilan" | "GPT-4o" → "gpt4o" | "Gói Bảo Hiểm VIP" → "goibaohiemvip"
 
-    ## Nội dung:
-    {text}
     {wiki_context}
+
+    ## Nội dung cần trích xuất:
+    {text}
   wiki_synthesis_prompt: |
     ## Quy tắc Wiki (wiki_schema.md — nguồn sự thật, ưu tiên hơn mọi hướng dẫn bên dưới nếu mâu thuẫn):
     {schema}

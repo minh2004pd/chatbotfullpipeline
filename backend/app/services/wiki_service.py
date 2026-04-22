@@ -552,6 +552,12 @@ class WikiService:
         # Remove items with empty slug after sanitization
         deduped_items = [it for it in deduped_items if it["slug"]]
 
+        # Cross-source title dedup: nếu item mới có title trùng page đã tồn tại
+        # (slug khác) → redirect về slug cũ để merge thay vì tạo page trùng
+        deduped_items = await self._redirect_to_existing_by_title(
+            user_id=user_id, items=deduped_items
+        )
+
         slug_to_chunks = _build_slug_to_chunks(
             extractions,
             deduped_items,
@@ -710,30 +716,134 @@ class WikiService:
     async def _get_existing_wiki_context(self, user_id: str) -> str:
         """Đọc index.md và trả về danh sách entities/topics đã có để inject vào extraction prompt.
 
-        Giúp LLM ưu tiên reuse slug đã tồn tại thay vì tạo mới trùng lặp.
+        Inject TRƯỚC nội dung cần extract để LLM biết existing state khi đọc content.
+        Format tách entity/topic riêng để LLM dễ lookup.
         Trả về chuỗi rỗng nếu wiki chưa có page nào.
         """
         index_content = await self._repo.aread_index(user_id=user_id)
         if not index_content:
             return ""
 
-        existing_items: list[str] = []
+        entities: list[str] = []
+        topics: list[str] = []
         for line in index_content.splitlines():
             match = re.search(r"\[\[pages/(\w+)/(\w+)\.md\]\] — \*\*(.+?)\*\*", line)
             if match:
                 category, slug, title = match.groups()
-                existing_items.append(f"  - [{category}] {slug}: {title}")
+                if category == "entities":
+                    entities.append(f"  {slug}: {title}")
+                elif category == "topics":
+                    topics.append(f"  {slug}: {title}")
 
-        if not existing_items:
+        if not entities and not topics:
             return ""
 
-        lines = ["\n\n## Entities & Topics đã có trong Wiki (PHẢI reuse slug nếu liên quan):"]
-        lines.extend(existing_items[:50])  # cap 50 để tránh bloat context
-        lines.append(
-            "\nQuy tắc: nếu nội dung mới liên quan đến entity/topic đã có → dùng ĐÚNG slug trên. "
-            "Chỉ tạo slug MỚI khi thực sự là entity/topic CHƯA TỪNG có trong danh sách trên."
-        )
+        lines = [
+            "---",
+            "## ⚠️ WIKI HIỆN CÓ — ĐỌC TRƯỚC KHI TRÍCH XUẤT",
+            "",
+            "Khi nội dung đề cập đến entity/topic dưới đây → PHẢI dùng ĐÚNG slug đã có.",
+            "Chỉ tạo slug MỚI khi entity/topic THỰC SỰ chưa có trong danh sách này.",
+            "",
+        ]
+        if entities:
+            lines.append("### Entities đã có (slug: title)")
+            lines.extend(entities[:40])
+            lines.append("")
+        if topics:
+            lines.append("### Topics đã có (slug: title)")
+            lines.extend(topics[:10])
+            lines.append("")
+        lines.append("---")
         return "\n".join(lines)
+
+    async def _redirect_to_existing_by_title(
+        self, *, user_id: str, items: list[dict]
+    ) -> list[dict]:
+        """Học tích lũy: nếu item mới đề cập entity/topic đã có trong wiki → redirect về
+        slug cũ để synthesis merge thay vì tạo page mới.
+
+        Matching theo 2 tầng (ưu tiên từ trên xuống):
+        1. Exact: _slugify(new_title) == _slugify(existing_title)
+        2. Prefix: one slug is a prefix of the other (min 5 chars) — bắt "gemini" vs "gemini25pro"
+
+        Không áp dụng cho summaries (mỗi source có 1 summary riêng).
+        """
+        _MIN_PREFIX_LEN = 5
+
+        all_pages = await self._repo.alist_all_pages(user_id=user_id)
+        if not all_pages:
+            return items
+
+        # Build two lookup maps (skip stubs)
+        # title_map: (category, title_key) → existing_slug
+        # slug_set:  set of (category, existing_slug)
+        title_map: dict[tuple[str, str], str] = {}
+        slug_set: set[tuple[str, str]] = set()  # (category, slug)
+
+        for page_info in all_pages:
+            content = await self._repo.aread_page(user_id=user_id, rel_path=page_info["rel_path"])
+            if not content or _is_stub(content):
+                continue
+            category = page_info["category"]
+            existing_slug = page_info["filename"].replace(".md", "")
+            slug_set.add((category, existing_slug))
+
+            existing_title = _parse_frontmatter_title(content) or ""
+            title_key = _slugify(existing_title)
+            if title_key:
+                title_map[(category, title_key)] = existing_slug
+
+        # Pre-group slugs by category for prefix matching
+        slugs_by_cat: dict[str, list[str]] = {}
+        for cat, sl in slug_set:
+            slugs_by_cat.setdefault(cat, []).append(sl)
+
+        def _find_redirect(category: str, new_slug: str, title_key: str) -> str | None:
+            # Tier 1: exact title match
+            match = title_map.get((category, title_key))
+            if match and match != new_slug:
+                return match
+            # Tier 2: prefix match — new slug starts with existing slug or vice versa
+            for ex_slug in slugs_by_cat.get(category, []):
+                if ex_slug == new_slug:
+                    continue
+                shorter = min(len(ex_slug), len(new_slug))
+                if shorter < _MIN_PREFIX_LEN:
+                    continue
+                if new_slug.startswith(ex_slug) or ex_slug.startswith(new_slug):
+                    return ex_slug
+            return None
+
+        result: list[dict] = []
+        for item in items:
+            category = item.get("category", "")
+            if category == "summaries":
+                result.append(item)
+                continue
+            new_slug = item.get("slug", "")
+            title_key = _slugify(item.get("title", ""))
+            redirect = _find_redirect(category, new_slug, title_key)
+            if redirect:
+                logger.info(
+                    "wiki_accumulate_redirect",
+                    new_slug=new_slug,
+                    existing_slug=redirect,
+                    title=item.get("title"),
+                )
+                result.append({**item, "slug": redirect})
+            else:
+                result.append(item)
+
+        # Dedup lại sau khi redirect (nhiều items có thể về cùng slug)
+        seen: set[tuple[str, str]] = set()
+        final: list[dict] = []
+        for item in result:
+            key = (item.get("category", ""), item.get("slug", ""))
+            if key not in seen:
+                seen.add(key)
+                final.append(item)
+        return final
 
     # ── LLM calls ─────────────────────────────────────────────────────────────
 
@@ -1319,6 +1429,21 @@ def _reduce_extractions(
             best_entity_items.append(best_item)
         else:
             best_topic_items.append(best_item)
+
+    # Title-based dedup: loại items có title giống nhau sau khi normalize
+    # Bắt LLM generate cùng title nhưng slug hơi khác (từ chunks khác)
+    def _dedup_by_title(items: list[dict]) -> list[dict]:
+        seen_title_keys: set[str] = set()
+        result: list[dict] = []
+        for item in items:
+            title_key = _slugify(item.get("title", item.get("slug", "")))
+            if title_key not in seen_title_keys:
+                seen_title_keys.add(title_key)
+                result.append(item)
+        return result
+
+    best_entity_items = _dedup_by_title(best_entity_items)
+    best_topic_items = _dedup_by_title(best_topic_items)
 
     # Apply global limits — giữ nguyên thứ tự xuất hiện (theo chunk_index của best instance)
     entities = best_entity_items[:max_entities]

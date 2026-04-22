@@ -891,6 +891,29 @@ def test_reduce_extractions_fallbacks():
     assert len(summaries) == 1
 
 
+def test_reduce_extractions_deduplicates_by_title():
+    """Hai chunks extract cùng topic nhưng slug hơi khác → title dedup loại bỏ duplicate."""
+    extractions = [
+        _ChunkExtraction(
+            chunk_index=0,
+            items=[{"slug": "kehoachramat", "category": "topics", "title": "Kế hoạch ra mắt"}],
+            chunk_text="chunk A" * 10,
+        ),
+        _ChunkExtraction(
+            chunk_index=1,
+            # Slug khác nhau nhưng title normalize → cùng key
+            items=[{"slug": "kehoachramat2", "category": "topics", "title": "kế hoạch ra mắt"}],
+            chunk_text="chunk B" * 5,
+        ),
+    ]
+
+    result = _reduce_extractions(extractions, "test-source", max_entities=10, max_topics=5)
+    topics = [t for t in result if t["category"] == "topics"]
+
+    # Hai items có cùng normalized title → chỉ giữ 1
+    assert len(topics) == 1
+
+
 # ── _build_slug_to_chunks: caps text size ────────────────────────────────────
 
 
@@ -1073,7 +1096,7 @@ async def test_get_existing_wiki_context_with_existing_pages(service, repo):
     assert result != ""
     assert "lora" in result
     assert "LoRA" in result
-    assert "PHẢI reuse slug" in result or "reuse slug" in result.lower()
+    assert "PHẢI dùng ĐÚNG slug" in result or "slug" in result.lower()
 
 
 @pytest.mark.asyncio
@@ -1362,3 +1385,77 @@ async def test_process_source_injects_wiki_context_into_extraction(service, repo
     assert any("lora" in ctx for ctx in received_contexts), (
         "wiki_context phải chứa slug 'lora' từ wiki hiện có"
     )
+
+
+# ── _redirect_to_existing_by_title (học tích lũy) ────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_redirect_exact_title_match(service, repo):
+    """Item mới có title normalize trùng page cũ → redirect về slug cũ."""
+    repo.ensure_wiki_structure(user_id=USER)
+    repo.write_page(
+        user_id=USER,
+        rel_path="pages/entities/gemini.md",
+        content="---\ntitle: Gemini\nsources: [doc-1]\nlast_updated: 2026-04-21\nversion: 1\n---\n# Gemini",
+    )
+
+    items = [{"slug": "googlegemini", "category": "entities", "title": "Gemini", "type": "model"}]
+    result = await service._redirect_to_existing_by_title(user_id=USER, items=items)
+
+    assert len(result) == 1
+    assert result[0]["slug"] == "gemini"
+
+
+@pytest.mark.asyncio
+async def test_redirect_prefix_match(service, repo):
+    """Slug mới bắt đầu bằng slug cũ (>= 5 chars) → redirect để học tích lũy."""
+    repo.ensure_wiki_structure(user_id=USER)
+    repo.write_page(
+        user_id=USER,
+        rel_path="pages/entities/gemini.md",
+        content="---\ntitle: Gemini\nsources: [doc-1]\nlast_updated: 2026-04-21\nversion: 1\n---\n# Gemini",
+    )
+
+    # "gemini25pro" starts with "gemini" (6 chars >= 5) → redirect
+    items = [{"slug": "gemini25pro", "category": "entities", "title": "Gemini 2.5 Pro", "type": "model"}]
+    result = await service._redirect_to_existing_by_title(user_id=USER, items=items)
+
+    assert len(result) == 1
+    assert result[0]["slug"] == "gemini"
+
+
+@pytest.mark.asyncio
+async def test_redirect_skips_summaries(service, repo):
+    """Summaries không bị redirect dù title trùng."""
+    repo.ensure_wiki_structure(user_id=USER)
+    repo.write_page(
+        user_id=USER,
+        rel_path="pages/summaries/existingdoc.md",
+        content="---\ntitle: Existing Doc\nsources: [doc-1]\nlast_updated: 2026-04-21\nversion: 1\n---\n# Existing Doc",
+    )
+
+    items = [{"slug": "newdocslug", "category": "summaries", "title": "Existing Doc"}]
+    result = await service._redirect_to_existing_by_title(user_id=USER, items=items)
+
+    assert result[0]["slug"] == "newdocslug"  # giữ nguyên slug gốc
+
+
+@pytest.mark.asyncio
+async def test_redirect_deduplicates_after_merge(service, repo):
+    """Hai items redirect về cùng slug → chỉ giữ 1."""
+    repo.ensure_wiki_structure(user_id=USER)
+    repo.write_page(
+        user_id=USER,
+        rel_path="pages/entities/gemini.md",
+        content="---\ntitle: Gemini\nsources: [doc-1]\nlast_updated: 2026-04-21\nversion: 1\n---\n# Gemini",
+    )
+
+    items = [
+        {"slug": "geminiflash", "category": "entities", "title": "Gemini Flash", "type": "model"},
+        {"slug": "geminipro", "category": "entities", "title": "Gemini Pro", "type": "model"},
+    ]
+    result = await service._redirect_to_existing_by_title(user_id=USER, items=items)
+
+    entity_slugs = [it["slug"] for it in result if it["category"] == "entities"]
+    assert entity_slugs.count("gemini") == 1  # dedup sau khi cả 2 redirect về "gemini"
