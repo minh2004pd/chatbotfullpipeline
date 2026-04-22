@@ -17,12 +17,15 @@ function formatRelativeDate(dateStr: string): string {
 export default function SessionList() {
   const { sessions, isLoading, currentSessionId, deleteSession, loadSessionById } = useSessions()
   const resetSession = useChatStore((s) => s.resetSession)
+  const messages = useChatStore((s) => s.messages)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [loadingId, setLoadingId] = useState<string | null>(null)
   const loadingRef = useRef(false)
 
   const handleLoad = async (sessionId: string) => {
-    if (sessionId === currentSessionId || loadingRef.current) return
+    // Cho phép load lại nếu messages chưa có (vd: vừa login, sessionId persist từ lần trước nhưng messages rỗng)
+    if (sessionId === currentSessionId && messages.length > 0) return
+    if (loadingRef.current) return
     loadingRef.current = true
     setLoadingId(sessionId)
     await loadSessionById(sessionId)

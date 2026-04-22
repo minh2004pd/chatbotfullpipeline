@@ -45,7 +45,12 @@ export const useChatStore = create<ChatStore>()(
       },
 
       setUserId: (userId: string) => {
-        set({ userId })
+        if (get().userId !== userId) {
+          // userId thay đổi (login / switch user) → reset session để tránh collision
+          set({ userId, sessionId: generateId(), messages: [] })
+        } else {
+          set({ userId })
+        }
       },
 
       resetSession: () => {
