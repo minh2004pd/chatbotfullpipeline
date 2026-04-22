@@ -75,8 +75,8 @@ class Settings(BaseSettings):
     wiki_max_related_pages_per_source: int = (
         5  # số related pages tối đa được re-synthesize per ingest
     )
-    wiki_max_parallel_extractions: int = 5  # concurrent _extract_topics calls
-    wiki_max_parallel_synthesis: int = 5  # concurrent _synthesize_page calls
+    wiki_max_parallel_extractions: int = 2  # concurrent _extract_topics calls (giới hạn để tránh OOM trên ECS 1GB)
+    wiki_max_parallel_synthesis: int = 2  # concurrent _synthesize_page calls
     wiki_synthesis_max_text_per_page: int = 32768  # max merged text per page (2x chunk_size)
     wiki_conversation_update_enabled: bool = True  # feed conversation summaries vào wiki
     wiki_conversation_max_pages_per_update: int = 5  # max pages update per conversation summary
@@ -100,7 +100,7 @@ class Settings(BaseSettings):
     # JWT
     jwt_secret_key: str = ""
     jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 15
+    jwt_access_token_expire_minutes: int = 60
     jwt_refresh_token_expire_days: int = 7
 
     # Google OAuth
