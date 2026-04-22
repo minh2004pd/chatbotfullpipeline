@@ -68,52 +68,92 @@ prompts:
     Trả về JSON object (chỉ JSON thuần, không có text khác) theo đúng format:
     {{
       "entities": [
-        {{"slug": "kebab-case", "title": "Tên đầy đủ", "type": "model|framework|dataset|benchmark|researcher|lab|tool|method|concept"}}
+        {{"slug": "slug", "title": "Tên đầy đủ", "type": "model|framework|dataset|benchmark|researcher|lab|tool|method|concept"}}
       ],
       "topics": [
-        {{"slug": "kebab-case", "title": "Tên đầy đủ"}}
+        {{"slug": "slug", "title": "Tên đầy đủ"}}
       ],
-      "summary": {{"slug": "kebab-case", "title": "Tóm tắt: Tên nguồn"}}
+      "summary": {{"slug": "slug", "title": "Tóm tắt: Tên nguồn"}}
     }}
 
-    ## Quy tắc trích xuất
+    ## Quy tắc vàng — đọc kỹ trước khi extract
 
-    ⚠️ BẮT BUỘC: `entities` phải có ÍT NHẤT 1 phần tử, `topics` phải có ÍT NHẤT 1 phần tử, `summary` phải có đúng 1 phần tử. Không được để mảng rỗng [].
+    **Entity phải là DANH TỪ RIÊNG hoặc TÊN KỸ THUẬT CỤ THỂ có thể tra cứu được.**
+    Kiểm tra: "Có thể Google tên này và tìm được trang Wikipedia/paper/docs không?" → có = entity hợp lệ.
 
-    ### entities (ÍT NHẤT 1, tối đa {max_entities}):
-    Liệt kê mọi thực thể CÓ THỂ ĐỊNH DANH RÕ RÀNG — phủ rộng mọi lĩnh vực, không giới hạn AI/ML:
-    - **model**: AI model, ML model, statistical model, mathematical model (GPT-4o, Claude, LLaMA, BERT, ResNet, ARIMA, GARCH...)
-    - **framework**: thư viện, platform, standard (PyTorch, TensorFlow, React, Django, Kubernetes, ISO 9001, REST, GraphQL...)
-    - **dataset**: tập dữ liệu, corpus (ImageNet, MMLU, World Bank, Kaggle datasets, custom enterprise datasets...)
-    - **benchmark**: bộ đánh giá, metric system (HELM, SWE-bench, LeetCode, SPEC, TPC-C, LMBench...)
-    - **researcher**: tác giả, nhà nghiên cứu, chuyên gia (Yann LeCun, Geoffrey Hinton, Andrew Ng, John Carmack...)
-    - **lab**: tổ chức, công ty, institution (OpenAI, Google, Meta, MIT, Stanford, NASA, WHO...)
-    - **tool**: công cụ, phần mềm, hạ tầng (Docker, K8s, Qdrant, PostgreSQL, Redis, Git, VS Code...)
-    - **method**: phương pháp/algorithm CỤ THỂ có thể implement được — bất kỳ lĩnh vực nào:
-      * Software: Agile, Scrum, CI/CD, TDD, Microservices, Event Sourcing, CQRS
-      * AI/ML: ReAct, LoRA, RLHF, DPO, Chain-of-Thought, RAG
-      * Data: ETL pipeline, MapReduce, Change Data Capture, OLAP cube
-      * DevOps: Blue-Green Deployment, Canary Release, GitOps, Infrastructure as Code
-      * Science: Monte Carlo method, Finite Element Analysis, CRISPR, PCR
-      * Business: Lean Startup, OKR, A/B Testing, Growth Hacking
-      **Phân biệt với concept**: method = quy trình/algorithm CỤ THỂ có thể implement; concept = ý tưởng/kiến trúc tổng quát.
-    - **concept**: kiến trúc/paradigm/ý tưởng tổng quát:
-      Transformer, Microservices, Serverless, Agile, DevOps, CI/CD, REST, ACID, CAP Theorem, Blockchain, Edge Computing, API Gateway, Event-Driven Architecture
-    Không bỏ sót entity nào. Bắt buộc phải có ít nhất 1 entity.
+    ### ✅ Nên extract:
+    - "LoRA", "GPT-4o", "BERT", "ResNet-50" (tên model cụ thể)
+    - "PyTorch", "LangChain", "Qdrant" (tên framework/tool cụ thể)
+    - "SQuAD", "MMLU", "ImageNet" (tên dataset cụ thể)
+    - "Yann LeCun", "Andrej Karpathy" (tên người)
+    - "OpenAI", "DeepMind" (tên tổ chức)
+    - "Attention Mechanism", "Mixture of Experts" (concept có tên riêng)
+    - "Direct Preference Optimization", "Chain-of-Thought Prompting" (method có tên riêng)
 
-    ### topics (ÍT NHẤT 1, tối đa {max_topics}, chọn quan trọng nhất):
-    Các CHỦ ĐỀ cấp độ cao — vấn đề/hướng quan trọng đang được thảo luận:
-    - Bất kỳ lĩnh vực: công nghệ, kinh doanh, khoa học, giáo dục, y tế, pháp lý, môi trường...
-    - Ví dụ: "Cloud Migration Strategy", "Data Privacy Compliance", "Performance Optimization", "Cost Reduction", "User Experience Design", "System Reliability"
-    KHÔNG trùng lặp với entities. Bắt buộc phải có ít nhất 1 topic.
+    ### ❌ KHÔNG extract — quá rộng hoặc quá chung:
+    - "machine learning", "deep learning", "artificial intelligence" → quá rộng, không phải entity
+    - "neural network", "language model" → là loại, không phải tên
+    - "optimization", "training", "fine-tuning" → là quy trình chung
+    - "data processing", "feature extraction" → mô tả chung
+    - "performance", "accuracy", "efficiency" → là metric chung
+    - "software development", "best practices" → quá generic
+    - Bất kỳ cụm từ nào có thể áp dụng cho hàng trăm paper/tài liệu khác nhau
+
+    ### Heuristic tránh entity quá rộng:
+    1. **Tên riêng test**: "LoRA" → chỉ 1 method → ✅. "fine-tuning" → hàng trăm method → ❌
+    2. **Slug test**: slug phải khớp với title gốc. "lora" ↔ "LoRA" ✅. "finetuning" ↔ "fine-tuning" nhưng title là một quy trình chung ❌
+    3. **Depth test**: entity phải đủ cụ thể để có thể viết 1 trang wiki riêng có nội dung thực chất
+    4. **Uniqueness test**: nếu 2 tài liệu hoàn toàn khác nhau đều nhắc đến entity này với cùng nghĩa → có thể là entity ✅. Nếu mỗi tài liệu dùng với nghĩa khác → quá chung ❌
+
+    ⚠️ BẮT BUỘC: `entities` phải có ÍT NHẤT 1 phần tử, `topics` phải có ÍT NHẤT 1 phần tử, `summary` phải có đúng 1 phần tử.
+
+    ---
+
+    ### entities (ÍT NHẤT 1, tối đa {max_entities}) — chỉ tên riêng/kỹ thuật cụ thể:
+
+    - **model**: tên model cụ thể (GPT-4o, Claude 3.5, LLaMA-3, ResNet-50, BERT, Whisper-v3, ARIMA, GARCH)
+      ❌ Không: "language model", "vision model", "predictive model"
+    - **framework**: tên thư viện/platform cụ thể (PyTorch, JAX, LangChain, FastAPI, Kubernetes, Terraform)
+      ❌ Không: "deep learning framework", "orchestration platform"
+    - **dataset**: tên dataset cụ thể (SQuAD 2.0, MMLU, ImageNet-21k, MS COCO, GSM8K)
+      ❌ Không: "training dataset", "evaluation corpus"
+    - **benchmark**: tên benchmark cụ thể (HELM, SWE-bench, LMSYS Arena, HumanEval, MMLU)
+      ❌ Không: "evaluation benchmark", "performance test"
+    - **researcher**: tên đầy đủ (Yann LeCun, Andrej Karpathy, Noam Shazeer)
+      ❌ Không: "the authors", "researchers"
+    - **lab**: tên tổ chức đầy đủ (OpenAI, Google DeepMind, Meta AI, Anthropic, MIT CSAIL)
+      ❌ Không: "AI company", "research lab"
+    - **tool**: tên tool/infra cụ thể (Docker, Qdrant, PostgreSQL, Redis, Weights & Biases)
+      ❌ Không: "vector database", "monitoring tool"
+    - **method**: tên phương pháp/algorithm có tên riêng được công nhận:
+      * LoRA, QLoRA, DPO, RLHF, ReAct, Chain-of-Thought, RAG, CQRS, Event Sourcing
+      * Blue-Green Deployment, Canary Release, A/B Testing, Monte Carlo Simulation
+      ❌ Không: "training method", "deployment strategy", "data augmentation" (quá chung)
+      **Phân biệt method vs concept**: method = "có paper/RFC/tên tác giả định nghĩa rõ"; concept = "kiến trúc/paradigm tổng quát đặt tên cho một ý tưởng"
+    - **concept**: kiến trúc/paradigm có tên riêng được công nhận rộng rãi:
+      Transformer, Attention Mechanism, Mixture of Experts, Retrieval-Augmented Generation, Diffusion Model, Generative Adversarial Network, ACID, CAP Theorem
+      ❌ Không: "scalability", "modularity", "performance optimization" (quá chung)
+
+    ### topics (ÍT NHẤT 1, tối đa {max_topics}) — hướng nghiên cứu/vấn đề cụ thể:
+
+    Topic là CHỦ ĐỀ/VẤN ĐỀ đặc thù đang được thảo luận trong nguồn này — đủ hẹp để viết 1 trang wiki có nội dung thực chất.
+
+    ✅ Tốt: "Parameter-Efficient Fine-Tuning", "LLM Hallucination Mitigation", "Real-Time Audio Transcription", "Multi-Agent Orchestration", "Inference Cost Optimization"
+    ❌ Tệ: "Machine Learning" (quá rộng), "AI Research" (quá chung), "Technology" (vô nghĩa)
+
+    Quy tắc:
+    - Mỗi topic phải đặc thù cho nội dung này — không phải category chung
+    - KHÔNG trùng lặp với entities
+    - Tốt nhất có 2-4 từ, tối đa 6 từ trong title
+    - Hỏi: "Topic này có trong tài liệu khác hoàn toàn khác nhau không?" → có thể có → ✅ (đủ cụ thể)
 
     ### summary (luôn có đúng 1):
     Slug = slugify của source_name, title = "Tóm tắt: {source_name}"
 
     ## Quy tắc slug
     CHỈ dùng chữ thường a-z và số 0-9, KHÔNG dùng dấu gạch ngang hay ký tự đặc biệt, tối đa 60 ký tự.
-    Ví dụ: "gpt4o", "kubernetes", "reactframework", "awss3", "pythonfastapi"
-    ⚠️ "U-Net" → "unet", "GPT-4o" → "gpt4o", "LoRA" → "lora", "CI/CD" → "cicd"
+    Ví dụ: "gpt4o", "lora", "qdrant", "squadv2", "yanllecun"
+    ⚠️ "U-Net" → "unet", "GPT-4o" → "gpt4o", "LoRA" → "lora", "SQuAD 2.0" → "squadv2"
 
     ## Nội dung cần phân tích:
     {text}
