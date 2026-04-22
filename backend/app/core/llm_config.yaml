@@ -62,100 +62,69 @@ prompts:
     - Khi trả lời dài: dùng headings, bullet points, tables cho dễ đọc.
 
   wiki_topic_extract_prompt: |
-    Phân tích nội dung dưới đây và trích xuất thông tin để xây dựng Knowledge Base Wiki.
+    Trích xuất entities và topics từ nội dung để xây dựng Knowledge Base.
     Nguồn: "{source_name}"
 
-    Trả về JSON object (chỉ JSON thuần, không có text khác) theo đúng format:
+    Nội dung có thể là BẤT KỲ dạng nào — họp nội bộ, hợp đồng, báo cáo tài chính, bệnh án, paper nghiên cứu, kế hoạch dự án, ghi chú cá nhân, v.v.
+    Trích xuất mọi entity quan trọng không phân biệt lĩnh vực.
+
+    Trả về JSON (chỉ JSON thuần, không text khác):
     {{
-      "entities": [
-        {{"slug": "slug", "title": "Tên đầy đủ", "type": "model|framework|dataset|benchmark|researcher|lab|tool|method|concept"}}
-      ],
-      "topics": [
-        {{"slug": "slug", "title": "Tên đầy đủ"}}
-      ],
-      "summary": {{"slug": "slug", "title": "Tóm tắt: Tên nguồn"}}
+      "entities": [{{"slug": "slug", "title": "Tên đầy đủ", "type": "person|org|product|tool|method|concept|model|framework|dataset|benchmark"}}],
+      "topics": [{{"slug": "slug", "title": "Tên chủ đề"}}],
+      "summary": {{"slug": "slug", "title": "Tóm tắt: {source_name}"}}
     }}
 
-    ## Quy tắc vàng — đọc kỹ trước khi extract
-
-    **Entity phải là DANH TỪ RIÊNG hoặc TÊN KỸ THUẬT CỤ THỂ có thể tra cứu được.**
-    Kiểm tra: "Có thể Google tên này và tìm được trang Wikipedia/paper/docs không?" → có = entity hợp lệ.
-
-    ### ✅ Nên extract:
-    - "LoRA", "GPT-4o", "BERT", "ResNet-50" (tên model cụ thể)
-    - "PyTorch", "LangChain", "Qdrant" (tên framework/tool cụ thể)
-    - "SQuAD", "MMLU", "ImageNet" (tên dataset cụ thể)
-    - "Yann LeCun", "Andrej Karpathy" (tên người)
-    - "OpenAI", "DeepMind" (tên tổ chức)
-    - "Attention Mechanism", "Mixture of Experts" (concept có tên riêng)
-    - "Direct Preference Optimization", "Chain-of-Thought Prompting" (method có tên riêng)
-
-    ### ❌ KHÔNG extract — quá rộng hoặc quá chung:
-    - "machine learning", "deep learning", "artificial intelligence" → quá rộng, không phải entity
-    - "neural network", "language model" → là loại, không phải tên
-    - "optimization", "training", "fine-tuning" → là quy trình chung
-    - "data processing", "feature extraction" → mô tả chung
-    - "performance", "accuracy", "efficiency" → là metric chung
-    - "software development", "best practices" → quá generic
-    - Bất kỳ cụm từ nào có thể áp dụng cho hàng trăm paper/tài liệu khác nhau
-
-    ### Heuristic tránh entity quá rộng:
-    1. **Tên riêng test**: "LoRA" → chỉ 1 method → ✅. "fine-tuning" → hàng trăm method → ❌
-    2. **Slug test**: slug phải khớp với title gốc. "lora" ↔ "LoRA" ✅. "finetuning" ↔ "fine-tuning" nhưng title là một quy trình chung ❌
-    3. **Depth test**: entity phải đủ cụ thể để có thể viết 1 trang wiki riêng có nội dung thực chất
-    4. **Uniqueness test**: nếu 2 tài liệu hoàn toàn khác nhau đều nhắc đến entity này với cùng nghĩa → có thể là entity ✅. Nếu mỗi tài liệu dùng với nghĩa khác → quá chung ❌
-
-    ⚠️ BẮT BUỘC: `entities` phải có ÍT NHẤT 1 phần tử, `topics` phải có ÍT NHẤT 1 phần tử, `summary` phải có đúng 1 phần tử.
+    ⚠️ BẮT BUỘC: entities ≥ 1, topics ≥ 1, summary = 1.
 
     ---
 
-    ### entities (ÍT NHẤT 1, tối đa {max_entities}) — chỉ tên riêng/kỹ thuật cụ thể:
+    ## ENTITY — tối đa {max_entities}
 
-    - **model**: tên model cụ thể (GPT-4o, Claude 3.5, LLaMA-3, ResNet-50, BERT, Whisper-v3, ARIMA, GARCH)
-      ❌ Không: "language model", "vision model", "predictive model"
-    - **framework**: tên thư viện/platform cụ thể (PyTorch, JAX, LangChain, FastAPI, Kubernetes, Terraform)
-      ❌ Không: "deep learning framework", "orchestration platform"
-    - **dataset**: tên dataset cụ thể (SQuAD 2.0, MMLU, ImageNet-21k, MS COCO, GSM8K)
-      ❌ Không: "training dataset", "evaluation corpus"
-    - **benchmark**: tên benchmark cụ thể (HELM, SWE-bench, LMSYS Arena, HumanEval, MMLU)
-      ❌ Không: "evaluation benchmark", "performance test"
-    - **researcher**: tên đầy đủ (Yann LeCun, Andrej Karpathy, Noam Shazeer)
-      ❌ Không: "the authors", "researchers"
-    - **lab**: tên tổ chức đầy đủ (OpenAI, Google DeepMind, Meta AI, Anthropic, MIT CSAIL)
-      ❌ Không: "AI company", "research lab"
-    - **tool**: tên tool/infra cụ thể (Docker, Qdrant, PostgreSQL, Redis, Weights & Biases)
-      ❌ Không: "vector database", "monitoring tool"
-    - **method**: tên phương pháp/algorithm có tên riêng được công nhận:
-      * LoRA, QLoRA, DPO, RLHF, ReAct, Chain-of-Thought, RAG, CQRS, Event Sourcing
-      * Blue-Green Deployment, Canary Release, A/B Testing, Monte Carlo Simulation
-      ❌ Không: "training method", "deployment strategy", "data augmentation" (quá chung)
-      **Phân biệt method vs concept**: method = "có paper/RFC/tên tác giả định nghĩa rõ"; concept = "kiến trúc/paradigm tổng quát đặt tên cho một ý tưởng"
-    - **concept**: kiến trúc/paradigm có tên riêng được công nhận rộng rãi:
-      Transformer, Attention Mechanism, Mixture of Experts, Retrieval-Augmented Generation, Diffusion Model, Generative Adversarial Network, ACID, CAP Theorem
-      ❌ Không: "scalability", "modularity", "performance optimization" (quá chung)
+    **Nguyên tắc**: Entity = tên riêng chỉ định 1 thực thể cụ thể. Đủ để viết 1 trang riêng.
+    Không phân biệt lĩnh vực — kỹ thuật, kinh doanh, y tế, pháp lý, khoa học, đời thường đều hợp lệ.
 
-    ### topics (ÍT NHẤT 1, tối đa {max_topics}) — hướng nghiên cứu/vấn đề cụ thể:
+    | Type | Mô tả | Ví dụ (đa lĩnh vực) |
+    |------|-------|----------------------|
+    | **person** | Cá nhân bất kỳ có tên | Nguyễn Thị Lan, Warren Buffett, "Anh Minh (CTO)", Hippocrates |
+    | **org** | Tổ chức, công ty, đội nhóm, cơ quan có tên | Viettel, WHO, "Ban Kiểm soát", MIT, "Nhóm vận hành ca 3" |
+    | **product** | Sản phẩm, dịch vụ, hệ thống, tính năng có tên | "Gói Bảo Hiểm Sức Khỏe Gia Đình", Salesforce, iPhone, "Module Phê duyệt Tín dụng" |
+    | **tool** | Công cụ, phần mềm, thiết bị, nền tảng có tên | Excel, Docker, Jira, "Máy CT-Scan GE Revolution", PostgreSQL, Figma |
+    | **method** | Quy trình/phương pháp có TÊN RIÊNG được công nhận | Scrum, CRISPR, "Phương pháp 5S", A/B Testing, Kanban, Monte Carlo |
+    | **concept** | Lý thuyết/khái niệm/paradigm có tên riêng | "Lý thuyết Trò chơi", Blockchain, ACID, "Kinh tế Tuần hoàn", Microservices |
+    | **model** | Model định lượng/AI/thống kê có tên | "Mô hình Black-Scholes", GPT-4o, ARIMA, GARCH |
+    | **framework** | Thư viện/chuẩn/platform kỹ thuật có tên | ISO 27001, React, PyTorch, OAuth 2.0 |
+    | **dataset** | Tập dữ liệu có tên | "Báo cáo Tài chính Q1 2024", ImageNet, "Hồ sơ Bệnh nhân 2023" |
+    | **benchmark** | Bộ tiêu chuẩn đánh giá có tên | HELM, TPC-C, "KPI Doanh thu Q3" |
 
-    Topic là CHỦ ĐỀ/VẤN ĐỀ đặc thù đang được thảo luận trong nguồn này — đủ hẹp để viết 1 trang wiki có nội dung thực chất.
+    ❌ BỎ QUA nếu là mô tả chung, không có tên riêng:
+    "hệ thống", "nhóm dự án", "sản phẩm của chúng tôi", "quy trình hiện tại", "công nghệ mới", "best practices"
 
-    ✅ Tốt: "Parameter-Efficient Fine-Tuning", "LLM Hallucination Mitigation", "Real-Time Audio Transcription", "Multi-Agent Orchestration", "Inference Cost Optimization"
-    ❌ Tệ: "Machine Learning" (quá rộng), "AI Research" (quá chung), "Technology" (vô nghĩa)
+    ---
 
-    Quy tắc:
-    - Mỗi topic phải đặc thù cho nội dung này — không phải category chung
-    - KHÔNG trùng lặp với entities
-    - Tốt nhất có 2-4 từ, tối đa 6 từ trong title
-    - Hỏi: "Topic này có trong tài liệu khác hoàn toàn khác nhau không?" → có thể có → ✅ (đủ cụ thể)
+    ## TOPICS — ít nhất 1, tối đa {max_topics}
 
-    ### summary (luôn có đúng 1):
-    Slug = slugify của source_name, title = "Tóm tắt: {source_name}"
+    Topic = vấn đề/chủ đề CHÍNH đang được bàn. Đủ cụ thể để viết 1 trang wiki riêng.
 
-    ## Quy tắc slug
-    CHỈ dùng chữ thường a-z và số 0-9, KHÔNG dùng dấu gạch ngang hay ký tự đặc biệt, tối đa 60 ký tự.
-    Ví dụ: "gpt4o", "lora", "qdrant", "squadv2", "yanllecun"
-    ⚠️ "U-Net" → "unet", "GPT-4o" → "gpt4o", "LoRA" → "lora", "SQuAD 2.0" → "squadv2"
+    Ví dụ đa lĩnh vực:
+    - Họp/Dự án: "Kế hoạch Ra mắt Sản phẩm Q4", "Đàm phán Hợp đồng Nhà cung cấp", "Tái cơ cấu Nhân sự Phòng Kinh doanh"
+    - Kỹ thuật: "Chiến lược Nâng cấp Hệ thống Core Banking", "Tối ưu Chi phí Cloud", "Bảo mật API Production"
+    - Kinh doanh/Tài chính: "Dự báo Doanh thu 2025", "Phân tích Churn Khách hàng", "Mở rộng Thị trường Đông Nam Á"
+    - Y tế/Khoa học: "Phác đồ Điều trị Hậu Covid", "Kết quả Thử nghiệm Lâm sàng Giai đoạn 2"
+    - Cá nhân/Học tập: "Lộ trình Phát triển Kỹ năng Leadership", "Đánh giá 360 độ Nhân viên"
+    - Pháp lý/Tuân thủ: "Tuân thủ GDPR Dữ liệu Khách hàng", "Tranh chấp Bản quyền Phần mềm"
 
-    ## Nội dung cần phân tích:
+    ❌ Quá chung: "Kinh doanh", "Công nghệ", "Họp hàng tuần", "Tổng quan dự án"
+    ❌ Trùng với entity đã extract.
+    Quy tắc: title 2–6 từ, rõ nghĩa, ngôn ngữ nội dung (tiếng Việt hoặc Anh).
+
+    ---
+
+    ## SLUG
+    Chỉ [a-z0-9], không gạch ngang, không dấu, tối đa 60 ký tự.
+    "Nguyễn Thị Lan" → "nguyenthilan" | "GPT-4o" → "gpt4o" | "Gói Bảo Hiểm VIP" → "goibaohiemvip"
+
+    ## Nội dung:
     {text}
     {wiki_context}
   wiki_synthesis_prompt: |
@@ -167,6 +136,7 @@ prompts:
     Cập nhật trang Wiki về "{topic_title}" (type: **{topic_type}**) với thông tin mới từ nguồn "{source_name}" (ID: {source_id}).
 
     ⚠️ Dùng template phù hợp với type **"{topic_type}"** ở phía dưới. Nếu type là "auto", suy luận từ tên entity.
+    Types hợp lệ: person | org | product | model | framework | dataset | benchmark | tool | method | concept | topic | summary
 
     ## Nội dung Wiki hiện tại (trống nếu trang mới):
     {existing_content}
@@ -195,7 +165,7 @@ prompts:
     ---
     title: (tên entity/topic)
     tags: [tag1, tag2]
-    type: {topic_type}
+    type: (1 trong: person|org|product|model|framework|dataset|benchmark|tool|method|concept|topic|summary)
     sources: [{source_id}]
     last_updated: (ngày hôm nay ISO 8601)
     version: (tăng 1 so với version cũ, hoặc 1 nếu trang mới)
@@ -206,15 +176,15 @@ prompts:
     - Nếu trang đã có sources từ trước, GIỮ NGUYÊN và THÊM "{source_id}"
     - Ví dụ đúng: sources: [doc-abc123, doc-xyz789]
 
-    **Cho entity loại model (AI/ML model, statistical model...):**
+    **Cho entity loại model (AI/ML model, mô hình tài chính, mô hình thống kê, mô hình dự báo...):**
     ## Tổng quan
-    Là gì, do ai/org nào phát triển, thuộc lĩnh vực nào.
-    ## Kiến trúc & Thông số
-    Architecture, parameter count, training approach, key specs.
+    Là gì, do ai/org nào phát triển, thuộc lĩnh vực nào, dùng để làm gì.
+    ## Cấu trúc & Tham số
+    Công thức, tham số, biến đầu vào/đầu ra, assumptions chính.
     ## Kết quả & Đánh giá
-    Số liệu cụ thể từ nguồn — benchmark, metric, so sánh.
-    ## Điểm mạnh & Hạn chế
-    Dựa trên bằng chứng từ nguồn.
+    Số liệu cụ thể từ nguồn — độ chính xác, metric, so sánh với alternatives.
+    ## Điều kiện áp dụng & Hạn chế
+    Khi nào dùng được, giả định cần thoả mãn, điểm yếu đã biết.
     ## Entities liên quan
     [[pages/entities/slug.md]] — quan hệ.
     ## Tiến triển & Phiên bản
@@ -222,17 +192,17 @@ prompts:
 
     ---
 
-    **Cho entity loại method (bất kỳ phương pháp/algorithm cụ thể):**
+    **Cho entity loại method (bất kỳ phương pháp/quy trình/algorithm cụ thể):**
     ## Vấn đề giải quyết
-    Method này ra đời để giải quyết vấn đề gì.
+    Method này ra đời để giải quyết vấn đề gì, trong lĩnh vực nào.
     ## Cách hoạt động
-    Mô tả step-by-step hoặc pseudocode nếu nguồn có. Giữ nguyên notation.
+    Mô tả step-by-step, quy trình, hoặc pseudocode nếu nguồn có. Giữ nguyên notation/thuật ngữ.
     ## Điều kiện áp dụng
-    Khi nào nên dùng, prerequisite, constraint.
-    ## Kết quả thực nghiệm
-    Task/dataset, improvement so với baseline (kèm số liệu).
-    ## Variants & Extensions
-    Các biến thể cải tiến.
+    Khi nào nên dùng, prerequisites, constraints, điều kiện tổ chức/kỹ thuật.
+    ## Kết quả & Bằng chứng
+    Hiệu quả thực tế, improvement so với cách cũ, số liệu đo lường (nếu có trong nguồn).
+    ## Biến thể & Mở rộng
+    Các biến thể, phiên bản cải tiến, adaptations cho domain khác.
     ## Entities liên quan
     [[pages/entities/slug.md]] — mô tả quan hệ.
 
@@ -258,17 +228,17 @@ prompts:
 
     **Cho entity loại dataset/benchmark:**
     ## Mô tả
-    Mục đích, domain, scale.
-    ## Cấu trúc & Format
-    Split, annotation type, evaluation metric.
-    ## Bảng so sánh kết quả
-    | Model/System | Score | Year | Source |
-    |--------------|-------|------|--------|
+    Mục đích, domain, quy mô, ai tạo ra/quản lý.
+    ## Cấu trúc & Nội dung
+    Các thành phần, format, cách tổ chức dữ liệu, metric đo lường.
+    ## Bảng so sánh kết quả / Leaderboard
+    | Hệ thống / Phương pháp | Kết quả | Thời điểm | Nguồn |
+    |------------------------|---------|-----------|-------|
     Giữ nguyên kết quả cũ, thêm mới.
-    ## Trend Analysis
-    1-2 câu phân tích xu hướng.
-    ## Được dùng để đánh giá
-    ## Hạn chế & Bias đã biết
+    ## Xu hướng
+    1-2 câu phân tích xu hướng qua thời gian.
+    ## Được dùng để đánh giá / Phạm vi áp dụng
+    ## Hạn chế & Lưu ý đã biết
 
     ---
 
@@ -288,14 +258,41 @@ prompts:
 
     ---
 
-    **Cho entity loại researcher/lab/org:**
+    **Cho entity loại person (cá nhân):**
     ## Tổng quan
-    Ai/đâu, lĩnh vực chuyên môn, vị trí trong ngành.
-    ## Đóng góp chính
-    Papers, products, methods tiêu biểu.
-    ## Triết lý / Hướng tiếp cận
+    Vai trò, tổ chức, lĩnh vực chuyên môn.
+    ## Đóng góp & Công việc chính
+    Dự án, sản phẩm, nghiên cứu, quyết định quan trọng được đề cập trong nguồn.
+    ## Quan điểm & Phong cách làm việc
+    (Nếu có thông tin từ nguồn)
     ## Entities liên quan
-    [[pages/entities/slug.md]] — papers, methods, products.
+    [[pages/entities/slug.md]] — tổ chức, dự án, sản phẩm liên quan.
+
+    ---
+
+    **Cho entity loại org (tổ chức, công ty, đội nhóm):**
+    ## Tổng quan
+    Loại tổ chức, lĩnh vực, quy mô (nếu biết).
+    ## Sản phẩm & Dự án chính
+    Các sản phẩm, dự án, đóng góp nổi bật được đề cập.
+    ## Nhân sự chính
+    [[pages/entities/person-slug.md]] — vai trò.
+    ## Entities liên quan
+    [[pages/entities/slug.md]]
+
+    ---
+
+    **Cho entity loại product (sản phẩm, dịch vụ, hệ thống):**
+    ## Tổng quan
+    Sản phẩm là gì, do ai phát triển/sở hữu, mục đích.
+    ## Tính năng & Khả năng chính
+    Danh sách tính năng, specs, capabilities được đề cập trong nguồn.
+    ## Người dùng & Use Cases
+    Ai dùng, dùng để làm gì.
+    ## Trạng thái & Phiên bản
+    Version, release status, roadmap (nếu có).
+    ## Entities liên quan
+    [[pages/entities/slug.md]] — org, team, công nghệ liên quan.
 
     ---
 
@@ -312,8 +309,8 @@ prompts:
     ## Thông tin nguồn
     - **Source ID**: {source_id}
     - **Tên nguồn**: {source_name}
-    - **Tác giả**: (nếu có)
-    - **Năm / Venue**: (nếu có)
+    - **Tác giả / Người tạo**: (nếu có)
+    - **Thời điểm / Nguồn gốc**: (nếu có — ngày họp, năm xuất bản, hội nghị, phòng ban, v.v.)
     - **Lĩnh vực**: (tự động xác định)
     ## TL;DR (1-2 câu)
     ## Điểm chính (bullet points)
