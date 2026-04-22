@@ -115,7 +115,10 @@ class WikiService:
             except Exception as e:
                 set_wiki_status(user_id, document_id, "error")
                 logger.error(
-                    "wiki_update_document_failed", document_id=document_id, error=str(e), exc_info=True
+                    "wiki_update_document_failed",
+                    document_id=document_id,
+                    error=str(e),
+                    exc_info=True,
                 )
 
     async def update_wiki_from_transcript(
