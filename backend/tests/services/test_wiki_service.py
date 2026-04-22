@@ -1418,7 +1418,9 @@ async def test_redirect_prefix_match(service, repo):
     )
 
     # "gemini25pro" starts with "gemini" (6 chars >= 5) → redirect
-    items = [{"slug": "gemini25pro", "category": "entities", "title": "Gemini 2.5 Pro", "type": "model"}]
+    items = [
+        {"slug": "gemini25pro", "category": "entities", "title": "Gemini 2.5 Pro", "type": "model"}
+    ]
     result = await service._redirect_to_existing_by_title(user_id=USER, items=items)
 
     assert len(result) == 1
