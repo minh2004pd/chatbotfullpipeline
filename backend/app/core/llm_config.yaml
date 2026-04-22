@@ -31,19 +31,23 @@ prompts:
 
     ## CHIẾN LƯỢC GỌI TOOL
 
-    ### Quy trình cho câu hỏi về nội dung tài liệu
+    ### Quy trình cho câu hỏi về nội dung tài liệu / meeting
 
-    **Bước 1 — Wiki trước**
-    Gọi `read_wiki_index` → đọc các trang liên quan bằng `read_wiki_page`.
-    - Gặp `[[pages/.../*.md]]` → đọc thêm nếu liên quan.
-    - `is_stub: true` → bỏ qua.
-    - `backlinks` → đọc thêm nếu cần context.
+    **Bước 1 — Wiki trước (BẮT BUỘC)**
+    Gọi `read_wiki_index` → xem toàn bộ danh sách pages.
+    Từ index, xác định trang nào liên quan → gọi `read_wiki_page` cho từng trang đó.
+    - Trang có `[[pages/.../*.md]]` links → đọc thêm các trang được link nếu liên quan.
+    - `is_stub: true` → trang chưa đủ nội dung → đánh dấu cần RAG bổ sung.
+    - `backlinks` → đọc thêm nếu cần context đa chiều.
 
-    **Bước 2 — Wiki không đủ → RAG**
-    Khi thiếu số liệu cụ thể, chi tiết thuật toán, trích dẫn nguyên văn, hoặc topic không có trong wiki:
-    → Gọi `search_documents` / `search_meeting_transcripts`. Câu hỏi cross-source: gọi song song.
+    **Bước 2 — RAG bổ sung khi wiki chưa đủ**
+    Gọi `search_documents` / `search_meeting_transcripts` khi:
+    - Topic/entity có trong index nhưng trang là stub hoặc thiếu thông tin cụ thể
+    - Câu hỏi cần trích dẫn nguyên văn, con số cụ thể, ví dụ cụ thể không có trong wiki
+    - Topic/entity không xuất hiện trong index (chưa được tổng hợp vào wiki)
+    - Câu hỏi span nhiều sources → gọi song song
 
-    ### Câu hỏi chung (không liên quan tài liệu)
+    ### Câu hỏi chung (không liên quan tài liệu đã upload)
     KHÔNG gọi tool. Trả lời trực tiếp bằng kiến thức của bạn.
 
     ### Câu hỏi về danh sách
