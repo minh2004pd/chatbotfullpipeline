@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 
 import structlog
 from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 
 from app.core.dependencies import UserIDDep
 from app.repositories.meeting_repo import MeetingRepository
@@ -266,6 +266,76 @@ def get_transcript(meeting_id: str, user_id: UserIDDep):
         title=meta.get("title", "Untitled"),
         utterances=utterances,
         total=len(utterances),
+    )
+
+
+def _format_transcript_md(title: str, meta: dict, utterances: list[UtteranceItem]) -> str:
+    created = meta.get("created_at", "")[:10]
+    duration_ms = meta.get("duration_ms")
+    duration_str = "--"
+    if duration_ms:
+        s = int(duration_ms / 1000)
+        m, sec = divmod(s, 60)
+        h, m = divmod(m, 60)
+        duration_str = f"{h}h {m}m {sec}s" if h else (f"{m}m {sec}s" if m else f"{sec}s")
+    speakers = ", ".join(meta.get("speakers", [])) or "--"
+
+    lines = [
+        f"# {title}",
+        "",
+        f"**Date:** {created}  ",
+        f"**Duration:** {duration_str}  ",
+        f"**Speakers:** {speakers}",
+        "",
+        "---",
+        "",
+        "## Transcript",
+        "",
+    ]
+
+    for u in utterances:
+        speaker = u.speaker or "unknown"
+        if u.translated_text:
+            lines.append(f"**[{speaker}]** {u.translated_text}")
+            lines.append(f"> _{u.text}_")
+        else:
+            lines.append(f"**[{speaker}]** {u.text}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+@meetings_router.get("/{meeting_id}/transcript/download")
+def download_transcript(meeting_id: str, user_id: UserIDDep):
+    """Tải transcript dưới dạng file Markdown."""
+    repo = _get_meeting_repo()
+    meta = repo.get_meeting(meeting_id=meeting_id, user_id=user_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Meeting không tồn tại")
+
+    utterances_raw = repo.list_utterances(meeting_id=meeting_id)
+    utterances = [
+        UtteranceItem(
+            speaker=u.get("speaker", "speaker_0"),
+            language=u.get("language"),
+            text=u.get("text", ""),
+            translated_text=u.get("translated_text"),
+            start_ms=u.get("start_ms"),
+            end_ms=u.get("end_ms"),
+            created_at=datetime.fromisoformat(u["created_at"]) if u.get("created_at") else None,
+        )
+        for u in utterances_raw
+    ]
+
+    title = meta.get("title", "Untitled")
+    content = _format_transcript_md(title, meta, utterances)
+    safe_title = "".join(c if c.isalnum() or c in " -_" else "_" for c in title).strip()
+    filename = f"{safe_title or meeting_id}.md"
+
+    return PlainTextResponse(
+        content=content,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

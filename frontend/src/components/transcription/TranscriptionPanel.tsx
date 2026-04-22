@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Mic, ChevronDown, ChevronRight, Trash2, FileText } from 'lucide-react'
+import { Mic, ChevronDown, ChevronRight, Download, Trash2, FileText } from 'lucide-react'
 import { useChatStore } from '@/store/chatStore'
 import { useTranscription } from '@/hooks/useTranscription'
 import type { AudioSource, MeetingInfo } from '@/types'
 import MeetingControls from './MeetingControls'
-import { deleteMeeting, getMeetingTranscript } from '@/api/transcription'
+import { deleteMeeting, downloadTranscriptMd, getMeetingTranscript } from '@/api/transcription'
 
 // Màu cho từng speaker
 const SPEAKER_COLORS: Record<string, string> = {
@@ -115,6 +115,15 @@ export default function TranscriptionPanel() {
       } catch {
         // ignore
       }
+    }
+  }
+
+  const handleDownloadMd = async (meeting: MeetingInfo, e: React.MouseEvent) => {
+    e.stopPropagation()
+    try {
+      await downloadTranscriptMd(meeting.meeting_id, userId, meeting.title)
+    } catch {
+      // ignore
     }
   }
 
@@ -258,6 +267,13 @@ export default function TranscriptionPanel() {
                           {new Date(m.created_at).toLocaleDateString()}
                         </p>
                       </div>
+                      <button
+                        onClick={(e) => handleDownloadMd(m, e)}
+                        className="p-1 text-[#444] hover:text-violet-400 opacity-0 group-hover:opacity-100 transition-all rounded flex-shrink-0"
+                        title="Download transcript (.md)"
+                      >
+                        <Download size={12} />
+                      </button>
                       <button
                         onClick={(e) => handleDeleteMeeting(m.meeting_id, e)}
                         className="p-1 text-[#444] hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all rounded flex-shrink-0"

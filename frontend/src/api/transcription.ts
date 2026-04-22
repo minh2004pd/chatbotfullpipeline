@@ -74,3 +74,20 @@ export async function deleteMeeting(meetingId: string, userId: string): Promise<
     headers: { 'X-User-ID': userId },
   })
 }
+
+export async function downloadTranscriptMd(
+  meetingId: string,
+  userId: string,
+  filename: string,
+): Promise<void> {
+  const resp = await apiClient.get(`/api/v1/meetings/${meetingId}/transcript/download`, {
+    headers: { 'X-User-ID': userId },
+    responseType: 'blob',
+  })
+  const url = URL.createObjectURL(new Blob([resp.data], { type: 'text/markdown' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename.endsWith('.md') ? filename : `${filename}.md`
+  a.click()
+  URL.revokeObjectURL(url)
+}
