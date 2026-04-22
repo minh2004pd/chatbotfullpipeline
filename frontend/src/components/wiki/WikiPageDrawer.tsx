@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { X, Loader2, AlertCircle } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -13,23 +14,46 @@ interface WikiPageDrawerProps {
   node: WikiGraphNode
   onClose: () => void
   onNavigate: (slug: string, category: string) => void
+  allNodes?: WikiGraphNode[]
 }
 
-export default function WikiPageDrawer({ node, onClose, onNavigate }: WikiPageDrawerProps) {
+export default function WikiPageDrawer({ node, onClose, onNavigate, allNodes = [] }: WikiPageDrawerProps) {
   const { data, isLoading, isError } = useWikiPage(node.category, node.id)
   const color = getNodeColor(node.type)
 
+  // Map "category/slug" → is_stub để classify wiki links khi render
+  const nodeStubMap = useMemo(() => {
+    const map = new Map<string, boolean>()
+    for (const n of allNodes) map.set(`${n.category}/${n.id}`, n.is_stub)
+    return map
+  }, [allNodes])
+
   // Preprocess markdown: strip frontmatter, source citations, convert [[wiki links]]
   const processContent = (raw: string): string => {
-    // Strip YAML frontmatter between --- markers
     let content = raw.replace(/^---\n[\s\S]*?\n---\n?/, '')
-    // Remove source citation UUIDs like [813c6abc-ccf4-...]
     content = content.replace(/\s*\[[0-9a-f]{8}-[0-9a-f-]{27}\]/g, '')
-    // Convert [[pages/category/slug.md]] → markdown link [slug](wiki:category/slug)
+
+    // [[pages/category/slug.md]] — full format
     content = content.replace(
       /\[\[pages\/([^/\]]+)\/([^\]]+?)\.md\]\]/g,
-      (_, cat, slug) => `[${slug.replace(/-/g, ' ')}](wiki:${cat}/${encodeURIComponent(slug)})`
+      (_, cat, slug) => {
+        const normalizedSlug = slug.replace(/[^a-z0-9]/g, '').toLowerCase()
+        if (!normalizedSlug) return slug
+        const isStub = nodeStubMap.get(`${cat}/${normalizedSlug}`)
+        const proto = isStub === true ? 'wiki-stub' : 'wiki'
+        return `[${slug.replace(/-/g, ' ')}](${proto}:${cat}/${encodeURIComponent(normalizedSlug)})`
+      }
     )
+
+    // [[slug]] — plain format (backward compat, LLM đôi khi viết không có prefix)
+    content = content.replace(/\[\[([^\]\/\s]+)\]\]/g, (_, slug) => {
+      const normalizedSlug = slug.replace(/[^a-z0-9]/g, '').toLowerCase()
+      if (!normalizedSlug) return slug
+      const isStub = nodeStubMap.get(`entities/${normalizedSlug}`)
+      const proto = isStub === true ? 'wiki-stub' : 'wiki'
+      return `[${slug.replace(/-/g, ' ')}](${proto}:entities/${encodeURIComponent(normalizedSlug)})`
+    })
+
     return content
   }
 
@@ -98,6 +122,17 @@ export default function WikiPageDrawer({ node, onClose, onNavigate }: WikiPageDr
               rehypePlugins={[rehypeKatex]}
               components={{
                 a: ({ href, children }) => {
+                  if (href?.startsWith('wiki-stub:')) {
+                    // Stub page — không thể navigate, hiện mờ
+                    return (
+                      <span
+                        className="text-[#555] cursor-default"
+                        title="Stub — trang này chưa được synthesize"
+                      >
+                        {children}
+                      </span>
+                    )
+                  }
                   if (href?.startsWith('wiki:')) {
                     const rest = href.slice(5)
                     const slashIdx = rest.indexOf('/')

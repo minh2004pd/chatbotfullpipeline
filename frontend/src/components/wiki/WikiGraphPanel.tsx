@@ -53,6 +53,15 @@ const WikiGraphPanel = React.memo(function WikiGraphPanel() {
     sourceIds: debouncedSourceIds,
   })
 
+  // Query riêng cho navigation — bao gồm stubs, không filter source
+  // Dùng để resolve wiki links trong drawer và check stub status
+  const { data: allNodesData } = useWikiGraph({
+    userId,
+    showStubs: true,
+    showSummaries: true,
+    sourceIds: [],
+  })
+
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const { applyLayout } = useGraphLayout()
@@ -123,10 +132,19 @@ const WikiGraphPanel = React.memo(function WikiGraphPanel() {
 
   const handleNavigate = useCallback(
     (slug: string, category: string) => {
+      // Tìm trong filtered graph trước (có đủ info: title, type, backlink_count...)
       const target = data?.nodes.find((n) => n.id === slug && n.category === category)
-      if (target) setSelectedNode(target)
+      if (target && !target.is_stub) {
+        setSelectedNode(target)
+        return
+      }
+      // Không có trong filtered graph (bị ẩn bởi filter) → tìm trong allNodes
+      const allTarget = allNodesData?.nodes.find((n) => n.id === slug && n.category === category)
+      if (allTarget && !allTarget.is_stub) {
+        setSelectedNode(allTarget)
+      }
     },
-    [data],
+    [data, allNodesData],
   )
 
   const miniMapNodeColor = useCallback((node: Node) => {
@@ -367,6 +385,7 @@ const WikiGraphPanel = React.memo(function WikiGraphPanel() {
             node={selectedNode}
             onClose={() => setSelectedNode(null)}
             onNavigate={handleNavigate}
+            allNodes={allNodesData?.nodes ?? []}
           />
         </div>
       )}
