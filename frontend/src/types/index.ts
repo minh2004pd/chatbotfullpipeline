@@ -248,7 +248,7 @@ export interface ChatStore {
 export interface UploadProgress {
   filename: string
   progress: number
-  status: 'uploading' | 'rag_done' | 'wiki_processing' | 'done' | 'error'
+  status: 'uploading' | 'rag_done' | 'queued' | 'wiki_processing' | 'done' | 'error'
   documentId?: string   // set sau khi upload API trả về
   chunkCount?: number   // set từ RAG result
   error?: string

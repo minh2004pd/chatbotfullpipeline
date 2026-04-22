@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { FileText, Trash2, RefreshCw, Loader2, AlertCircle, Layers, CheckCircle2 } from 'lucide-react'
+import { FileText, Trash2, RefreshCw, Loader2, AlertCircle, Layers, CheckCircle2, Clock } from 'lucide-react'
 import { useDocuments } from '@/hooks/useDocuments'
 import UploadZone from './UploadZone'
 import type { UploadProgress } from '@/types'
@@ -128,7 +128,8 @@ export default function DocumentPanel() {
 
 function UploadProgressRow({ progress }: { progress: UploadProgress }) {
   const isUploading = progress.status === 'uploading'
-  const isPostUpload = ['rag_done', 'wiki_processing', 'done', 'error'].includes(progress.status)
+  const isPostUpload = ['rag_done', 'queued', 'wiki_processing', 'done', 'error'].includes(progress.status)
+  const isQueued = progress.status === 'queued'
   const isWikiDone = progress.status === 'done'
   const isError = progress.status === 'error'
 
@@ -170,15 +171,29 @@ function UploadProgressRow({ progress }: { progress: UploadProgress }) {
               <CheckCircle2 size={9} className="text-green-500 flex-shrink-0" />
             ) : isError ? (
               <AlertCircle size={9} className="text-red-400 flex-shrink-0" />
+            ) : isQueued ? (
+              <Clock size={9} className="text-[#555] flex-shrink-0" />
             ) : (
               <Loader2 size={9} className="text-violet-400 animate-spin flex-shrink-0" />
             )}
             <span
               className={`text-[9px] ${
-                isError ? 'text-red-400' : isWikiDone ? 'text-[#555]' : 'text-violet-400'
+                isError
+                  ? 'text-red-400'
+                  : isWikiDone
+                    ? 'text-[#555]'
+                    : isQueued
+                      ? 'text-[#555]'
+                      : 'text-violet-400'
               }`}
             >
-              {isWikiDone ? 'Wiki index' : isError ? 'Wiki — lỗi' : 'Wiki đang xây dựng...'}
+              {isWikiDone
+                ? 'Wiki index'
+                : isError
+                  ? 'Wiki — lỗi'
+                  : isQueued
+                    ? 'Wiki — đợi file trước xử lí xong...'
+                    : 'Wiki đang xây dựng...'}
             </span>
           </div>
         </div>

@@ -78,8 +78,24 @@ export function useDocuments() {
               return { ...prev, [tempId]: { ...entry, status: 'error', error: 'Wiki indexing failed' } }
             })
             scheduleRemove(tempId, 5000)
+          } else if (wiki === 'queued') {
+            // Đang chờ pipeline lock — hiện trạng thái "queued"
+            setUploadProgresses((prev) => {
+              const entry = prev[tempId]
+              if (!entry) return prev
+              return { ...prev, [tempId]: { ...entry, status: 'queued' } }
+            })
+            setTimeout(() => void tick(), POLL_INTERVAL_MS)
           } else {
-            // "processing" — tiếp tục poll
+            // "processing" — đang xử lí, update status nếu đang là queued
+            setUploadProgresses((prev) => {
+              const entry = prev[tempId]
+              if (!entry) return prev
+              if (entry.status === 'queued') {
+                return { ...prev, [tempId]: { ...entry, status: 'wiki_processing' } }
+              }
+              return prev
+            })
             setTimeout(() => void tick(), POLL_INTERVAL_MS)
           }
         } catch {
@@ -130,6 +146,9 @@ export function useDocuments() {
 
         addToast({ type: 'success', message: `"${file.name}" uploaded successfully.` })
 
+        // Hiện document ngay sau khi RAG xong — không đợi wiki
+        void queryClient.invalidateQueries({ queryKey: DOCUMENTS_QUERY_KEY })
+
         // Bắt đầu poll wiki status
         pollWikiStatus(tempId, result.document_id)
       } catch {
@@ -145,7 +164,7 @@ export function useDocuments() {
         scheduleRemove(tempId, 5000)
       }
     },
-    [addToast, pollWikiStatus, scheduleRemove],
+    [addToast, pollWikiStatus, scheduleRemove, queryClient],
   )
 
   return {

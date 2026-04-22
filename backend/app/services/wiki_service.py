@@ -51,6 +51,9 @@ class _ChunkExtraction:
 _page_locks: dict[str, asyncio.Lock] = {}
 # asyncio.Lock per user cho link_index.json (1 file chia sẻ toàn user)
 _link_index_locks: dict[str, asyncio.Lock] = {}
+# asyncio.Lock per user để serialize toàn bộ wiki pipeline — tránh rate limit Gemini
+# Mỗi user chỉ chạy 1 wiki pipeline tại 1 thời điểm; các task sau xếp hàng đợi
+_wiki_pipeline_locks: dict[str, asyncio.Lock] = {}
 # Regex extract [[slug]] links từ wiki content
 _WIKI_LINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 
@@ -66,6 +69,12 @@ def _get_link_index_lock(user_id: str) -> asyncio.Lock:
     if user_id not in _link_index_locks:
         _link_index_locks[user_id] = asyncio.Lock()
     return _link_index_locks[user_id]
+
+
+def _get_wiki_pipeline_lock(user_id: str) -> asyncio.Lock:
+    if user_id not in _wiki_pipeline_locks:
+        _wiki_pipeline_locks[user_id] = asyncio.Lock()
+    return _wiki_pipeline_locks[user_id]
 
 
 class WikiService:
@@ -88,21 +97,26 @@ class WikiService:
             return
         from app.core.indexing_status import set_wiki_status
 
-        try:
-            await self._process_source(
-                user_id=user_id,
-                source_id=document_id,
-                source_name=filename,
-                raw_text=full_text,
-                raw_category="documents",
-                raw_filename=f"{document_id}.txt",
-            )
-            set_wiki_status(user_id, document_id, "done")
-        except Exception as e:
-            set_wiki_status(user_id, document_id, "error")
-            logger.error(
-                "wiki_update_document_failed", document_id=document_id, error=str(e), exc_info=True
-            )
+        # Đánh dấu queued ngay — frontend hiện "đang chờ" trong khi đợi lock
+        set_wiki_status(user_id, document_id, "queued")
+        async with _get_wiki_pipeline_lock(user_id):
+            # Đã vào hàng — bắt đầu xử lí
+            set_wiki_status(user_id, document_id, "processing")
+            try:
+                await self._process_source(
+                    user_id=user_id,
+                    source_id=document_id,
+                    source_name=filename,
+                    raw_text=full_text,
+                    raw_category="documents",
+                    raw_filename=f"{document_id}.txt",
+                )
+                set_wiki_status(user_id, document_id, "done")
+            except Exception as e:
+                set_wiki_status(user_id, document_id, "error")
+                logger.error(
+                    "wiki_update_document_failed", document_id=document_id, error=str(e), exc_info=True
+                )
 
     async def update_wiki_from_transcript(
         self,
@@ -123,14 +137,15 @@ class WikiService:
             )
             if not full_text.strip():
                 return
-            await self._process_source(
-                user_id=user_id,
-                source_id=meeting_id,
-                source_name=title,
-                raw_text=full_text,
-                raw_category="transcripts",
-                raw_filename=f"{meeting_id}.txt",
-            )
+            async with _get_wiki_pipeline_lock(user_id):
+                await self._process_source(
+                    user_id=user_id,
+                    source_id=meeting_id,
+                    source_name=title,
+                    raw_text=full_text,
+                    raw_category="transcripts",
+                    raw_filename=f"{meeting_id}.txt",
+                )
         except Exception as e:
             logger.error("wiki_update_transcript_failed", meeting_id=meeting_id, error=str(e))
 
