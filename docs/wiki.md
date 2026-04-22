@@ -1,7 +1,7 @@
 # Wiki Knowledge Base — MemRAG
 
 > Hệ thống tự động xây dựng và duy trì structured knowledge base từ documents và meeting transcripts.
-> Cập nhật lần cuối: 2026-04-21
+> Cập nhật lần cuối: 2026-04-22
 
 ---
 
@@ -120,6 +120,8 @@ Tất cả chunk results → _reduce_extractions()
     ↓
 - Merge entities/trùng slug (cùng category + cùng source)
 - Merge topics/trùng slug
+- Heuristic: "longer chunk wins" — giữ item từ chunk dài hơn khi trùng slug
+- Defensive: isinstance(slug, list) → normalize thành string (chống LLM trả list thay vì string)
 - Giới hạn: WIKI_MAX_ENTITIES_PER_SOURCE (20), WIKI_MAX_TOPICS_PER_SOURCE (5)
     ↓
 _build_slug_to_chunks() → map mỗi slug → merged text từ tất cả chunks liên quan
@@ -153,11 +155,14 @@ Song song:
 ### Phase 4: FINALIZATION
 
 ```
-_update_related_pages() — scan pages khác có cùng source_id, cập nhật nếu liên quan
-    ↓
+_update_related_pages() — scan pages khác link đến entities vừa tạo, re-synthesize top-N
+    ↓                    (priority: -backlink_count DESC, last_updated ASC)
 _rebuild_index() — rebuild index.md từ scratch (rule-based, không LLM)
     ↓
-_rebuild_link_index() — rebuild link_index.json từ scratch (scan [[links]] trong content)
+_rebuild_link_index() — rebuild link_index.json từ scratch (3-pass):
+    Pass 1: scan tất cả pages, extract explicit [[links]] từ content
+    Pass 2: build source_id → entity rel_paths map từ frontmatter
+    Pass 3: merge implicit entity links cho topic/summary pages cùng source_id
     ↓
 append_log() — ghi entry vào log.md
 ```
@@ -279,7 +284,7 @@ Auto-generated sau mỗi ingestion. Format:
 ```
 
 ### link_index.json
-Forward link index — JSON map `rel_path → [list of rel_paths linked from this page]`:
+Bidirectional link index — JSON map `rel_path → [list of rel_paths linked from this page]`:
 
 ```json
 {
@@ -294,9 +299,15 @@ Forward link index — JSON map `rel_path → [list of rel_paths linked from thi
 }
 ```
 
+**3-pass rebuild** (`_rebuild_link_index`):
+1. **Pass 1 — Explicit links**: Scan content tất cả pages, extract `[[pages/...]]` refs.
+2. **Pass 2 — Source-entity map**: Build `source_id → entity rel_paths` từ frontmatter `sources` field.
+3. **Pass 3 — Implicit links**: Topic/summary pages cùng source_id → tự động link đến entities cùng source.
+
 Dùng để:
 - Tính **backlink_count** cho mỗi node trong graph
 - Tạo **edges** cho React Flow visualization
+- `read_wiki_page()` tool trả `backlinks` (pages khác link đến trang này)
 
 ---
 
@@ -306,18 +317,23 @@ Agent đọc wiki theo flow:
 
 ```
 1. read_wiki_index()
-   → Nhận danh sách tất cả wiki pages (~1-2k tokens)
-   → Chọn pages liên quan đến query
+    → Nhận danh sách tất cả wiki pages (~1-2k tokens)
+    → Chọn pages liên quan đến query
 
-2. read_wiki_page(rel_path)
-   → Đọc nội dung page cụ thể
-   → Nhận: content, backlinks, is_stub flag
+2. list_wiki_pages(category="entities|topics|summaries")
+    → Liệt kê tất cả pages trong 1 category
+    → Hữu ích khi cần browse toàn bộ entities/topics/summaries
 
-3. Nếu is_stub=True hoặc nội dung chưa đủ:
-   → Fallback search_documents / search_meeting_transcripts
+3. read_wiki_page(rel_path)
+    → Đọc nội dung page cụ thể
+    → Nhận: content, backlinks, backlink_count, is_stub flag
+    → Path traversal protection: bắt buộc prefix "pages/"
 
-4. Nếu page có [[pages/.../*.md]] links liên quan:
-   → Đọc thêm bằng read_wiki_page
+4. Nếu is_stub=True hoặc nội dung chưa đủ:
+    → Fallback search_documents / search_meeting_transcripts
+
+5. Nếu page có [[pages/.../*.md]] links liên quan:
+    → Đọc thêm bằng read_wiki_page
 ```
 
 ### Agent strategy
@@ -440,7 +456,7 @@ Polling: bắt đầu sau 1.5s, interval 2s, timeout 120s.
 | `WIKI_CHUNK_SIZE` | `16384` | Kích thước chunk cho extraction |
 | `WIKI_MAX_ENTITIES_PER_SOURCE` | `20` | Số entities tối đa extract per source |
 | `WIKI_MAX_TOPICS_PER_SOURCE` | `5` | Số topics tối đa extract per source |
-| `WIKI_MAX_RELATED_PAGES_PER_SOURCE` | `10` | Số pages liên quan tối đa update |
+| `WIKI_MAX_RELATED_PAGES_PER_SOURCE` | `5` | Số pages liên quan tối đa update (re-synthesis) |
 | `WIKI_MAX_PARALLEL_EXTRACTIONS` | `5` | Concurrent _extract_topics calls |
 | `WIKI_MAX_PARALLEL_SYNTHESIS` | `5` | Concurrent _synthesize_page calls |
 | `WIKI_SYNTHESIS_MAX_TEXT_PER_PAGE` | `32768` | Max merged text per page |
@@ -492,6 +508,9 @@ frontend/src/
 |-------|---------|------------|
 | `gemini-2.0-flash` | _extract_topics (MAP phase) | `llm.summary_model` |
 | `gemini-2.0-flash` | _synthesize_page (SYNTHESIS phase) | `llm.summary_model` |
+| `gemini-2.0-flash` | _assess_summary_relevance (Conversation → Wiki) | `llm.summary_model` |
+| `gemini-2.0-flash` | _update_page (Conservative merge từ conversation) | `llm.summary_model` |
+| `gemini-2.0-flash` | _resynthesize_without_source (Deletion flow) | `llm.summary_model` |
 
 > Wiki dùng `summary_model` (gemini-2.0-flash) thay vì `gemini-2.5-flash` của Root Agent — chi phí thấp hơn, tốc độ nhanh hơn cho batch processing.
 
@@ -549,3 +568,69 @@ WikiService.update_wiki_from_conversation_summary()
 - Format frontmatter
 - Quy ước liên kết & trích dẫn
 - Nguyên tắc cập nhật
+
+---
+
+## 18. Race Condition Guard
+
+Wiki pipeline chạy fire-and-forget → nhiều ingestion có thể chạy song song. Sử dụng 2 cấp lock:
+
+| Lock | Scope | Mục đích |
+|------|-------|----------|
+| `_page_locks["{user_id}:{rel_path}"]` | Per page | Chống 2 ingestion cùng lúc ghi/update 1 page |
+| `_link_index_locks["{user_id}"]` | Per user | `link_index.json` là shared file → lock toàn user |
+
+Lock được tạo lazy (`dict.setdefault`) — không cần pre-initialize.
+
+---
+
+## 19. Redis Caching (WikiRepository)
+
+| Cache key pattern | TTL | Invalidation |
+|-------------------|-----|--------------|
+| `memrag:wiki:{user_id}:page:{rel_path}` | `redis_wiki_ttl` (600s) | Xóa trên `awrite_page`, `adelete_page` |
+| `memrag:wiki:{user_id}:index` | `redis_wiki_ttl` (600s) | Xóa trên `awrite_page`, `awrite_index` |
+| `memrag:wiki:{user_id}:schema` | `redis_wiki_ttl * 3` (1800s) | Schema thay đổi ít → TTL dài hơn |
+| `memrag:wiki:{user_id}:link_index` | `redis_wiki_ttl` (600s) | Xóa trên `awrite_page`, `awrite_link_index` |
+| `memrag:wiki:{user_id}:graph:{params_hash}` | `redis_graph_ttl` (120s) | Pattern `graph:*` invalidated trên write/delete |
+
+Graph endpoint đắt → cache ngắn 120s, hash params thành cache key.
+
+---
+
+## 20. Migration Utility
+
+`WikiService.normalize_page_filenames()` — sửa pages có slug không chuẩn (uppercase, ký tự đặc biệt, gạch ngang):
+
+```
+normalize_page_filenames(user_id)
+    ↓
+1. Scan tất cả pages → slugify filename theo chuẩn [a-z0-9]
+2. Nếu target đã tồn tại:
+   ├─ Merge sources từ old → new
+   ├─ Giữ content của target (new)
+   └─ Xóa file old
+3. Nếu target chưa tồn tại:
+   └─ Rename file
+4. Rebuild index + link index
+    ↓
+Trả về: {"renamed": N, "merged": N, "skipped": N}
+```
+
+---
+
+## 21. Index Template
+
+`index.md` khởi tạo với 5 sections:
+
+```markdown
+# Wiki Index
+
+## Entities
+## Benchmarks
+## Mathematical Foundations
+## Topics
+## Summaries
+```
+
+"Benchmarks" và "Mathematical Foundations" KHÔNG phải category directories — chúng là group headers cho entity pages có `type: benchmark` hoặc `type: concept` trong index.

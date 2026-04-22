@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import type { Node, Edge } from '@xyflow/react'
 
 interface LayoutResult {
@@ -11,7 +11,8 @@ interface LayoutResult {
  */
 export function useGraphLayout() {
   const workerRef = useRef<Worker | null>(null)
-  const [isLayoutReady, setIsLayoutReady] = useState(true)
+  // Use ref instead of state to avoid triggering re-renders and re-creating applyLayout
+  const isLayoutReady = useRef(true)
   const pendingCallback = useRef<((nodes: Node[]) => void) | null>(null)
 
   useEffect(() => {
@@ -27,12 +28,12 @@ export function useGraphLayout() {
           pendingCallback.current(e.data.layoutedNodes)
           pendingCallback.current = null
         }
-        setIsLayoutReady(true)
+        isLayoutReady.current = true
       }
 
       workerRef.current.onerror = (err) => {
         console.error('Graph layout worker error:', err)
-        setIsLayoutReady(true) // Allow fallback
+        isLayoutReady.current = true
       }
     } catch {
       console.warn('Web Workers not supported, using sync layout')
@@ -43,11 +44,11 @@ export function useGraphLayout() {
     }
   }, [])
 
+  // Stable reference — never changes because no state deps
   const applyLayout = useCallback(
     (nodes: Node[], edges: Edge[], callback: (layoutedNodes: Node[]) => void) => {
-      if (workerRef.current && isLayoutReady) {
-        // Use worker
-        setIsLayoutReady(false)
+      if (workerRef.current && isLayoutReady.current) {
+        isLayoutReady.current = false
         pendingCallback.current = callback
         workerRef.current.postMessage({ nodes, edges })
       } else {
@@ -58,7 +59,7 @@ export function useGraphLayout() {
         })
       }
     },
-    [isLayoutReady]
+    []
   )
 
   return { applyLayout }

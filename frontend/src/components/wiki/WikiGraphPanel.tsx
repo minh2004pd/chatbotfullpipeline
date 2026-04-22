@@ -71,16 +71,15 @@ const WikiGraphPanel = React.memo(function WikiGraphPanel() {
   // Convert activeWikiNodes array to Set for faster lookups
   const activeWikiNodesSet = useMemo(() => new Set(activeWikiNodes), [activeWikiNodes])
 
-  // Rebuild graph khi data hoặc activeWikiNodes thay đổi - optimized with useMemo
+  // Rebuild graph khi data hoặc activeWikiNodes thay đổi - không include selectedNode để tránh vòng lặp layout
   const graphElements = useMemo(() => {
     if (!data) return { nodes: [], edges: [] }
 
     const rfNodes: Node[] = data.nodes.map((n) => ({
-      id: n.key,   // unique key = "{category}/{slug}"
+      id: n.key,
       type: 'wikiNode',
       position: { x: 0, y: 0 },
       data: { ...n, isActive: activeWikiNodesSet.has(n.key) } as unknown as Record<string, unknown>,
-      selected: selectedNode?.key === n.key,
     }))
 
     const rfEdges: Edge[] = data.edges.map((e) => ({
@@ -92,9 +91,9 @@ const WikiGraphPanel = React.memo(function WikiGraphPanel() {
     }))
 
     return { nodes: rfNodes, edges: rfEdges }
-  }, [data, activeWikiNodesSet, selectedNode?.key])
+  }, [data, activeWikiNodesSet])
 
-  // Apply dagre layout and update nodes/edges
+  // Apply dagre layout khi graph structure thay đổi (không phụ thuộc applyLayout vì nó stable)
   useEffect(() => {
     if (graphElements.nodes.length === 0) {
       setNodes([])
@@ -106,7 +105,14 @@ const WikiGraphPanel = React.memo(function WikiGraphPanel() {
       setNodes(layoutedNodes)
       setEdges(graphElements.edges)
     })
-  }, [graphElements, applyLayout, setNodes, setEdges])
+  }, [graphElements]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cập nhật selected state riêng — không trigger layout
+  useEffect(() => {
+    setNodes((nds) =>
+      nds.map((n) => ({ ...n, selected: n.id === selectedNode?.key }))
+    )
+  }, [selectedNode?.key, setNodes])
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     const wikiNode = toWikiNode(node)
