@@ -36,7 +36,7 @@ def get_root_agent() -> LlmAgent:
     return LlmAgent(
         name="memrag_root_agent",
         model=config.llm.model,
-        description="MemRAG Chatbot - AI assistant với RAG và long-term memory",
+        description="MemRAG - AI assistant with RAG, knowledge base, and long-term memory",
         instruction=config.prompts.system_instruction,
         tools=[
             search_documents,

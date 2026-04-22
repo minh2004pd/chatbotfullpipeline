@@ -19,25 +19,18 @@ export default function WikiPageDrawer({ node, onClose, onNavigate }: WikiPageDr
   const { data, isLoading, isError } = useWikiPage(node.category, node.id)
   const color = getNodeColor(node.type)
 
-  // Render [[pages/entities/slug.md]] links as clickable spans
-  const renderContent = (content: string) => {
-    const parts = content.split(/(\[\[pages\/[^\]]+\]\])/g)
-    return parts.map((part, i) => {
-      const match = part.match(/^\[\[pages\/(\w+)\/(\w+)\.md\]\]$/)
-      if (match) {
-        const [, cat, slug] = match
-        return (
-          <button
-            key={i}
-            onClick={() => onNavigate(slug, cat)}
-            className="text-violet-400 hover:text-violet-300 underline underline-offset-2 cursor-pointer"
-          >
-            {slug}
-          </button>
-        )
-      }
-      return part
-    })
+  // Preprocess markdown: strip frontmatter, source citations, convert [[wiki links]]
+  const processContent = (raw: string): string => {
+    // Strip YAML frontmatter between --- markers
+    let content = raw.replace(/^---\n[\s\S]*?\n---\n?/, '')
+    // Remove source citation UUIDs like [813c6abc-ccf4-...]
+    content = content.replace(/\s*\[[0-9a-f]{8}-[0-9a-f-]{27}\]/g, '')
+    // Convert [[pages/category/slug.md]] → markdown link [slug](wiki:category/slug)
+    content = content.replace(
+      /\[\[pages\/([^/\]]+)\/([^\]]+?)\.md\]\]/g,
+      (_, cat, slug) => `[${slug.replace(/-/g, ' ')}](wiki:${cat}/${encodeURIComponent(slug)})`
+    )
+    return content
   }
 
   return (
@@ -104,13 +97,26 @@ export default function WikiPageDrawer({ node, onClose, onNavigate }: WikiPageDr
               remarkPlugins={[remarkGfm, remarkMath]}
               rehypePlugins={[rehypeKatex]}
               components={{
-                // Render [[pages/...]] wiki links as buttons
-                p: ({ children }) => (
-                  <p>{typeof children === 'string' ? renderContent(children) : children}</p>
-                ),
+                a: ({ href, children }) => {
+                  if (href?.startsWith('wiki:')) {
+                    const rest = href.slice(5)
+                    const slashIdx = rest.indexOf('/')
+                    const cat = rest.slice(0, slashIdx)
+                    const slug = decodeURIComponent(rest.slice(slashIdx + 1))
+                    return (
+                      <button
+                        onClick={() => onNavigate(slug, cat)}
+                        className="text-violet-400 hover:text-violet-300 underline underline-offset-2 cursor-pointer font-medium"
+                      >
+                        {children}
+                      </button>
+                    )
+                  }
+                  return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>
+                },
               }}
             >
-              {data.content}
+              {processContent(data.content)}
             </ReactMarkdown>
           </div>
         )}
