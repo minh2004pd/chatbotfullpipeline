@@ -46,7 +46,7 @@ export default function WikiPageDrawer({ node, onClose, onNavigate, allNodes = [
     )
 
     // [[slug]] — plain format (backward compat, LLM đôi khi viết không có prefix)
-    content = content.replace(/\[\[([^\]\/\s]+)\]\]/g, (_, slug) => {
+    content = content.replace(/\[\[([^\]/\s]+)\]\]/g, (_, slug) => {
       const normalizedSlug = slug.replace(/[^a-z0-9]/g, '').toLowerCase()
       if (!normalizedSlug) return slug
       const isStub = nodeStubMap.get(`entities/${normalizedSlug}`)
