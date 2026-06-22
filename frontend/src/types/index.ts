@@ -150,7 +150,8 @@ export interface MeetingInfo {
   meeting_id: string
   title: string
   user_id: string
-  status: 'recording' | 'completed'
+  status: 'recording' | 'processing' | 'completed' | 'failed'
+  source?: 'soniox' | '60db'
   duration_ms?: number
   speakers: string[]
   languages: string[]

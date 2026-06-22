@@ -151,6 +151,78 @@ class TestStopTranscription:
         assert data["utterance_count"] == 0
 
 
+class TestUploadTranscription:
+    @patch("app.api.v1.transcription._sixtydb")
+    @patch("app.api.v1.transcription._get_meeting_repo")
+    @patch("app.api.v1.transcription._get_transcript_rag")
+    def test_upload_transcribes_and_saves(
+        self, mock_get_rag, mock_get_repo, mock_sixtydb, client
+    ):
+        mock_sixtydb.transcribe_file = AsyncMock(
+            return_value={
+                "utterances": [
+                    {"seq": 0, "speaker": "speaker_0", "text": "Hello", "translated_text": None},
+                    {"seq": 1, "speaker": "speaker_1", "text": "Hi", "translated_text": None},
+                ],
+                "language": "en",
+                "duration_ms": 5000,
+            }
+        )
+        repo = _mock_meeting_repo()
+        mock_get_repo.return_value = repo
+        rag = MagicMock()
+        rag.ingest_utterances.return_value = 1
+        mock_get_rag.return_value = rag
+
+        resp = client.post(
+            "/api/v1/transcription/upload",
+            files={"file": ("meeting.mp3", b"fake-audio", "audio/mpeg")},
+            data={"title": "Uploaded meeting"},
+            headers={"X-User-ID": "test_user"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "completed"
+        assert data["utterance_count"] == 2
+        assert data["language"] == "en"
+        assert data["duration_ms"] == 5000
+        assert repo.save_utterance.call_count == 2
+        # Meeting tạo với source=60db
+        assert repo.create_meeting.call_args.kwargs["source"] == "60db"
+
+    @patch("app.api.v1.transcription._sixtydb")
+    @patch("app.api.v1.transcription._get_meeting_repo")
+    def test_upload_empty_file_returns_400(self, mock_get_repo, mock_sixtydb, client):
+        mock_get_repo.return_value = _mock_meeting_repo()
+        resp = client.post(
+            "/api/v1/transcription/upload",
+            files={"file": ("empty.wav", b"", "audio/wav")},
+            headers={"X-User-ID": "test_user"},
+        )
+        assert resp.status_code == 400
+
+    @patch("app.api.v1.transcription._sixtydb")
+    @patch("app.api.v1.transcription._get_meeting_repo")
+    def test_upload_sixtydb_error_returns_502(self, mock_get_repo, mock_sixtydb, client):
+        from app.services.sixtydb_service import SixtyDBError
+
+        mock_sixtydb.transcribe_file = AsyncMock(side_effect=SixtyDBError("60db down"))
+        repo = _mock_meeting_repo()
+        mock_get_repo.return_value = repo
+
+        resp = client.post(
+            "/api/v1/transcription/upload",
+            files={"file": ("a.wav", b"bytes", "audio/wav")},
+            headers={"X-User-ID": "test_user"},
+        )
+        assert resp.status_code == 502
+        # Meeting được đánh dấu failed
+        assert any(
+            c.kwargs.get("status") == "failed"
+            for c in repo.update_meeting_status.call_args_list
+        )
+
+
 class TestMeetingsCRUD:
     @patch("app.api.v1.transcription._get_meeting_repo")
     def test_list_meetings(self, mock_get_repo, client):

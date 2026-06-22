@@ -62,6 +62,15 @@ class Settings(BaseSettings):
     soniox_ws_url: str = "wss://stt-rt.soniox.com/transcribe-websocket"
     soniox_endpoint_delay_ms: int = 1000
 
+    # 60db (batch STT — file upload transcription, complements realtime Soniox)
+    sixtydb_api_key: str = ""
+    sixtydb_base_url: str = "https://api.60db.ai"
+    sixtydb_stt_path: str = "/stt"
+    sixtydb_default_language: str = ""  # empty = auto-detect (ISO 639-1 code otherwise)
+    sixtydb_diarize: bool = True
+    sixtydb_max_upload_mb: int = 10  # 60db hard limit: 10 MB / 1 hour per file
+    sixtydb_timeout_sec: float = 300.0
+
     # Meetings (DynamoDB table + Qdrant collection)
     meetings_table_name: str = "memrag-meetings"
     qdrant_collection_meetings: str = "meetings"

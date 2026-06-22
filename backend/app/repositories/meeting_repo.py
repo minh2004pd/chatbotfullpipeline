@@ -37,6 +37,8 @@ class MeetingRepository:
         meeting_id: str,
         user_id: str,
         title: str,
+        source: str = "soniox",
+        status: str = "recording",
     ) -> dict:
         now = datetime.now(timezone.utc).isoformat()
         item = {
@@ -45,7 +47,8 @@ class MeetingRepository:
             "meeting_id": meeting_id,
             "user_id": user_id,
             "title": title,
-            "status": "recording",
+            "status": status,
+            "source": source,
             "speakers": [],
             "languages": [],
             "utterance_count": 0,

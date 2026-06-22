@@ -101,6 +101,14 @@ HTTP Request → FastAPI Router (api/v1/) → Service Layer → Repository / ADK
 - **Context & terms**: có thể gửi `context` dict (general, text, terms, translation_terms) để improve accuracy cho domain cụ thể.
 - **Config**: `SONIOX_API_KEY`, `SONIOX_MODEL` (default `stt-rt-v4`), `SONIOX_TARGET_LANG` (default `vi`), `SONIOX_ENDPOINT_DELAY_MS` (default `1000`).
 
+**60db Batch STT** (`services/sixtydb_service.py`): Bổ sung cho Soniox — transcribe file audio/video đã ghi sẵn (≤10MB / 1h) qua 60db REST API, KHÔNG thay thế Soniox (realtime mic vẫn dùng Soniox). Soniox = live streaming; 60db = uploaded files.
+- Flow: `POST /transcription/upload` (multipart `file` + form `title`/`language`/`diarize`) → tạo meeting (`source="60db"`, `status="processing"`) → `SixtyDBService.transcribe_file()` gọi `POST {base_url}/stt` (httpx async, Bearer auth) → map response → finalize → trả `UploadTranscriptionResponse`. Đồng bộ (inline), giống Soniox `/stop`.
+- **Consistency**: 60db `segments[]` được map về CÙNG utterance shape Soniox sinh ra (`{seq, speaker, language, text, translated_text, confidence, start_ms, end_ms}`; giây→ms; speaker từ diarization chuẩn hóa `speaker_{n}`). File uploaded trở thành "meeting" giống hệt bản ghi realtime trong Meetings list, transcript view, download, delete, RAG search, wiki.
+- **Shared finalize**: cả `/stop` (Soniox) và `/upload` (60db) gọi chung `_persist_and_ingest()` trong `transcription.py` (save utterances → DynamoDB → update meeting status → ingest Qdrant → fire-and-forget wiki) — một code path duy nhất, tránh drift.
+- 60db STT là batch (không realtime, không streaming, không translation). `translated_text=None`. Lỗi 60db → 502 + meeting đánh dấu `status="failed"`.
+- Frontend: nút "Upload audio file" trong `MeetingControls` (`uploadAudioFile()` → multipart POST), badge `file` cho meetings có `source="60db"`.
+- **Config**: `SIXTYDB_API_KEY`, `SIXTYDB_BASE_URL` (default `https://api.60db.ai`), `SIXTYDB_STT_PATH` (`/stt`), `SIXTYDB_DEFAULT_LANGUAGE` (empty=auto), `SIXTYDB_DIARIZE` (default `true`), `SIXTYDB_MAX_UPLOAD_MB` (`10`), `SIXTYDB_TIMEOUT_SEC` (`300`).
+
 **Meeting Storage**: DynamoDB table `memrag-meetings` (single-table design) — `PK=USER#{user_id}, SK=MEETING#{id}` cho metadata; `PK=MEETING#{id}, SK=UTTERANCE#{ts}#{seq}` cho utterances. Qdrant collection `meetings` lưu chunked transcript embeddings (time-window 60s hoặc max 300 words/chunk). `ensure_meetings_table()` tạo table tự động khi startup. ADK tool `list_meetings` cho phép agent liệt kê tất cả meeting của user (dùng khi hỏi chung chung như "tôi có những cuộc họp nào?"); `search_meeting_transcripts` để tìm nội dung cụ thể bên trong.
 
 **Wiki Layer** (`repositories/wiki_repo.py`, `services/wiki_service.py`, `agents/tools/wiki_tools.py`): AI tự động tổng hợp Markdown knowledge pages sau mỗi ingestion event (PDF upload / transcript stop). Chạy background — không block response.

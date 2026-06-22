@@ -45,11 +45,22 @@ class StopTranscriptionResponse(BaseModel):
     utterance_count: int = 0
 
 
+class UploadTranscriptionResponse(BaseModel):
+    """Kết quả transcribe file qua 60db batch STT."""
+
+    meeting_id: str
+    status: str = "completed"
+    utterance_count: int = 0
+    language: str | None = None
+    duration_ms: int | None = None
+
+
 class MeetingInfo(BaseModel):
     meeting_id: str
     title: str
     user_id: str
-    status: str  # "recording" | "completed"
+    status: str  # "recording" | "processing" | "completed"
+    source: str = "soniox"  # "soniox" (realtime) | "60db" (uploaded file)
     duration_ms: int | None = None
     speakers: list[str] = []
     languages: list[str] = []

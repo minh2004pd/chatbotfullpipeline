@@ -48,8 +48,10 @@ export default function TranscriptionPanel() {
     meetings,
     error,
     isLoadingMeetings,
+    isUploading,
     startRecording,
     stopRecording,
+    uploadFile,
     fetchMeetings,
   } = useTranscription({ userId })
 
@@ -74,6 +76,15 @@ export default function TranscriptionPanel() {
   const handleStop = async () => {
     await stopRecording()
     setTitle('')
+  }
+
+  const handleUploadFile = async (file: File) => {
+    try {
+      await uploadFile(file, title || undefined)
+      setTitle('')
+    } catch {
+      // error hiển thị từ hook
+    }
   }
 
   const handleLoadTranscript = async (meeting: MeetingInfo) => {
@@ -172,6 +183,8 @@ export default function TranscriptionPanel() {
             onTitleChange={setTitle}
             enableTranslation={enableTranslation}
             onTranslationChange={setEnableTranslation}
+            onUploadFile={handleUploadFile}
+            isUploading={isUploading}
           />
         </div>
 
@@ -261,7 +274,14 @@ export default function TranscriptionPanel() {
                         <ChevronRight size={11} className="text-[#555] flex-shrink-0" />
                       )}
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm text-[#e0e0e0] truncate">{m.title}</p>
+                        <p className="text-sm text-[#e0e0e0] truncate flex items-center gap-1.5">
+                          <span className="truncate">{m.title}</span>
+                          {m.source === '60db' && (
+                            <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-sky-900/40 text-sky-300 border border-sky-700/40">
+                              file
+                            </span>
+                          )}
+                        </p>
                         <p className="text-xs text-[#555]">
                           {formatDuration(m.duration_ms)} · {m.utterance_count} utterances ·{' '}
                           {new Date(m.created_at).toLocaleDateString()}

@@ -199,6 +199,19 @@ variable "soniox_endpoint_delay_ms" {
   default     = 1000
 }
 
+# ── 60db (batch STT — uploaded file transcription) ──────────────────────────
+variable "sixtydb_api_key" {
+  description = "60db API key for batch STT (uploaded audio/video files)"
+  type        = string
+  sensitive   = true
+}
+
+variable "sixtydb_base_url" {
+  description = "60db API base URL"
+  type        = string
+  default     = "https://api.60db.ai"
+}
+
 variable "jwt_secret_key" {
   description = "JWT signing secret (HS256). Must be 32+ characters."
   type        = string

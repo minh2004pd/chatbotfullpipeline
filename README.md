@@ -44,7 +44,8 @@ Kết hợp RAG · Bộ nhớ dài hạn · Transcription thời gian thực · 
 | 🚀 **Realtime Chat Streaming** | SSE token-by-token, phản hồi tức thì |
 | 📄 **Multimodal PDF RAG** | Upload PDF → chunk → embed → semantic search với trích dẫn |
 | 🧠 **Long-term Memory** | Tích hợp **mem0** ghi nhớ thông tin cá nhân xuyên phiên |
-| 🎙️ **Realtime Transcription** | Soniox STT, 60+ ngôn ngữ, tự lưu transcript → RAG |
+| 🎙️ **Realtime Transcription** | Soniox STT (live mic), 60+ ngôn ngữ, tự lưu transcript → RAG |
+| 📁 **File Transcription** | 60db batch STT cho file audio/video upload (≤10MB), cùng pipeline với Soniox |
 | 🌐 **Wiki Knowledge Graph** | Tự tổng hợp từ tài liệu + meetings, visualize bằng React Flow |
 | ⚡ **Redis Caching** | ElastiCache cache wiki/graph/session/docs — giảm latency |
 | 🔐 **Auth** | JWT + Google OAuth2, refresh token rotation, CSRF protection |
@@ -139,6 +140,11 @@ Audio stream → WS /transcription/audio/{meeting_id}
 Stop meeting → POST /transcription/stop
     ├─► TranscriptRAGService.ingest() [Qdrant]
     └─► [background] WikiService.update_wiki_from_transcript()
+
+── HOẶC: upload file đã ghi sẵn ──
+Upload file → POST /transcription/upload (multipart)
+    └─► SixtyDBService → 60db /stt → utterances (source=60db)
+        └─► _persist_and_ingest()  ← cùng pipeline: DynamoDB + Qdrant + Wiki
 ```
 
 ### ⚡ Cache Strategy
@@ -153,6 +159,73 @@ Request đến API
 
 TTL: wiki_page=10min | wiki_graph=2min | sessions=1min | docs=1min | user=5min
 ```
+
+---
+
+## 📁 File Transcription (60db Batch STT)
+
+Bên cạnh **Soniox** (transcription realtime từ mic/system audio), hệ thống hỗ trợ **60db** để transcribe **file audio/video đã ghi sẵn**. Hai provider **song song, không thay thế nhau**:
+
+| | Soniox | 60db |
+|---|--------|------|
+| **Use case** | Live mic / system audio | Upload file đã ghi sẵn |
+| **Transport** | WebSocket streaming | REST (multipart upload) |
+| **Endpoint** | `/transcription/start` → `/audio` → `/stream` → `/stop` | `/transcription/upload` |
+| **Xử lý** | Realtime, partial + final tokens | Đồng bộ (1 request → transcript đầy đủ) |
+| **Translation** | Có (one-way) | Không |
+| **Giới hạn** | — | ≤ 10MB / 1 giờ / file |
+| **`source`** | `soniox` | `60db` |
+
+> 🔑 **Điểm mấu chốt:** Output của 60db được map về **cùng utterance shape** với Soniox, nên file upload trở thành một "meeting" giống hệt bản ghi realtime — xuất hiện trong Meetings list, transcript view, download `.md`, xóa, RAG search và Wiki synthesis. Cả hai dùng chung hàm `_persist_and_ingest()` (DynamoDB → Qdrant → Wiki).
+
+### Cách dùng — UI
+
+1. Mở **Transcription Panel** (icon Mic ở header).
+2. (Tùy chọn) nhập **Meeting title**.
+3. Bấm **"Upload audio file"** → chọn file (`WAV/MP3/M4A/OGG/FLAC/WebM/MP4`).
+4. Chờ spinner "Đang transcribe file..." → meeting mới xuất hiện trong list với badge **`file`**.
+
+### Cách dùng — API
+
+```bash
+curl -X POST http://localhost:8000/api/v1/transcription/upload \
+  -H "X-User-ID: my_user" \
+  -F "file=@meeting.mp3" \
+  -F "title=Q3 Planning Call" \
+  -F "diarize=true"
+  # -F "language=en"   # tùy chọn; bỏ trống = auto-detect
+```
+
+Response:
+```json
+{
+  "meeting_id": "meet_a1b2c3d4e5f6",
+  "status": "completed",
+  "utterance_count": 42,
+  "language": "en",
+  "duration_ms": 185000
+}
+```
+
+Sau đó transcript có thể truy cập như mọi meeting khác:
+```bash
+GET  /api/v1/meetings                          # list (uploaded file có source=60db)
+GET  /api/v1/meetings/{meeting_id}/transcript  # full transcript
+GET  /api/v1/meetings/{meeting_id}/transcript/download  # tải .md
+```
+
+### Cấu hình
+
+```bash
+SIXTYDB_API_KEY=your_60db_api_key_here   # bắt buộc để bật tính năng
+# SIXTYDB_BASE_URL=https://api.60db.ai   # default
+# SIXTYDB_DEFAULT_LANGUAGE=              # empty = auto-detect
+# SIXTYDB_DIARIZE=true                   # speaker diarization
+# SIXTYDB_MAX_UPLOAD_MB=10               # 60db hard limit
+# SIXTYDB_TIMEOUT_SEC=300
+```
+
+> Nếu `SIXTYDB_API_KEY` trống, endpoint trả về **502**. Lỗi từ 60db cũng trả **502** và đánh dấu meeting `status="failed"`.
 
 ---
 
@@ -390,7 +463,8 @@ terraform output  # xem endpoints
 | `REDIS_URL` | — | Redis connection URL |
 | `REDIS_ENABLED` | — | Bật/tắt cache (default: `true`) |
 | `DATABASE_URL` | — | PostgreSQL connection string |
-| `SONIOX_API_KEY` | — | Soniox STT API key |
+| `SONIOX_API_KEY` | — | Soniox STT API key (realtime mic) |
+| `SIXTYDB_API_KEY` | — | 60db batch STT API key (file upload) |
 | `WIKI_ENABLED` | — | Bật/tắt wiki pipeline (default: `true`) |
 | `DEBUG` | — | Dev mode — bỏ qua JWT (`true`/`false`) |
 

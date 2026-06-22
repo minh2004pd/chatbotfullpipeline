@@ -59,6 +59,8 @@ resource "aws_ecs_task_definition" "backend" {
         { name = "SONIOX_TARGET_LANG", value = var.soniox_target_lang },
         { name = "SONIOX_WS_URL", value = var.soniox_ws_url },
         { name = "SONIOX_ENDPOINT_DELAY_MS", value = tostring(var.soniox_endpoint_delay_ms) },
+        # 60db batch STT (non-secret config)
+        { name = "SIXTYDB_BASE_URL", value = var.sixtydb_base_url },
         # ElastiCache Redis
         { name = "REDIS_URL", value = "redis://${aws_elasticache_replication_group.redis.primary_endpoint_address}:6379/0" },
         # RDS PostgreSQL
@@ -69,6 +71,7 @@ resource "aws_ecs_task_definition" "backend" {
       secrets = [
         { name = "GEMINI_API_KEY", valueFrom = aws_ssm_parameter.gemini_api_key.arn },
         { name = "SONIOX_API_KEY", valueFrom = aws_ssm_parameter.soniox_api_key.arn },
+        { name = "SIXTYDB_API_KEY", valueFrom = aws_ssm_parameter.sixtydb_api_key.arn },
         { name = "JWT_SECRET_KEY", valueFrom = aws_ssm_parameter.jwt_secret_key.arn },
         # RDS PostgreSQL password from SSM
         { name = "DB_PASSWORD", valueFrom = aws_ssm_parameter.db_password.arn },
@@ -154,6 +157,14 @@ resource "aws_ssm_parameter" "soniox_api_key" {
   tags  = { Project = var.project_name }
 }
 
+# 60db API key (SecureString) — batch STT for uploaded files
+resource "aws_ssm_parameter" "sixtydb_api_key" {
+  name  = "/${var.project_name}/SIXTYDB_API_KEY"
+  type  = "SecureString"
+  value = var.sixtydb_api_key
+  tags  = { Project = var.project_name }
+}
+
 # JWT secret key (SecureString) — required for production auth
 resource "aws_ssm_parameter" "jwt_secret_key" {
   name  = "/${var.project_name}/JWT_SECRET_KEY"
@@ -175,6 +186,7 @@ resource "aws_iam_role_policy" "ecs_task_ssm" {
       Resource = [
         aws_ssm_parameter.gemini_api_key.arn,
         aws_ssm_parameter.soniox_api_key.arn,
+        aws_ssm_parameter.sixtydb_api_key.arn,
         aws_ssm_parameter.jwt_secret_key.arn,
         aws_ssm_parameter.db_password.arn,
       ]

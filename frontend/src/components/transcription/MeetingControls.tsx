@@ -1,5 +1,5 @@
-import React from 'react'
-import { Mic, Monitor, Layers, Square, Circle, Loader2 } from 'lucide-react'
+import React, { useRef } from 'react'
+import { Mic, Monitor, Layers, Square, Circle, Loader2, Upload } from 'lucide-react'
 import type { AudioSource } from '@/types'
 
 interface MeetingControlsProps {
@@ -14,6 +14,8 @@ interface MeetingControlsProps {
   onTitleChange: (title: string) => void
   enableTranslation: boolean
   onTranslationChange: (enabled: boolean) => void
+  onUploadFile?: (file: File) => void
+  isUploading?: boolean
 }
 
 const SOURCE_OPTIONS: { value: AudioSource; label: string; icon: React.ReactNode }[] = [
@@ -34,7 +36,18 @@ export default function MeetingControls({
   onTitleChange,
   enableTranslation,
   onTranslationChange,
+  onUploadFile,
+  isUploading,
 }: MeetingControlsProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file && onUploadFile) onUploadFile(file)
+    // Reset để cùng một file có thể upload lại
+    e.target.value = ''
+  }
+
   return (
     <div className="flex flex-col gap-3 p-3 bg-[#161616] rounded-lg border border-[#2e2e2e]">
       {/* Title input */}
@@ -108,6 +121,36 @@ export default function MeetingControls({
           <Circle size={14} className="fill-current" />
           Start Recording
         </button>
+      )}
+
+      {/* Upload audio file (60db batch STT) */}
+      {onUploadFile && (
+        <>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="audio/*,video/mp4,.wav,.mp3,.m4a,.ogg,.flac,.webm"
+            className="hidden"
+            onChange={handleFileChange}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isRecording || isStopping || isUploading}
+            className="flex items-center justify-center gap-2 py-2 rounded-md bg-[#1e1e1e] hover:bg-[#2a2a2a] text-[#ccc] text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isUploading ? (
+              <>
+                <Loader2 size={14} className="animate-spin" />
+                Đang transcribe file...
+              </>
+            ) : (
+              <>
+                <Upload size={14} />
+                Upload audio file
+              </>
+            )}
+          </button>
+        </>
       )}
 
       {/* Error */}

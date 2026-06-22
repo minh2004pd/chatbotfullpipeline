@@ -28,6 +28,10 @@ s3_secret_access_key = "your-s3-secret-access-key"
 soniox_api_key           = "your-soniox-api-key"
 soniox_endpoint_delay_ms = 1000
 
+# ── 60db (batch STT — uploaded files) ─────────────────────────────────────────
+sixtydb_api_key = "your-60db-api-key"
+# sixtydb_base_url = "https://api.60db.ai"  # default
+
 # ── ElastiCache Redis ─────────────────────────────────────────────────────────
 redis_node_type      = "cache.t3.micro"
 redis_engine_version = "7.1"

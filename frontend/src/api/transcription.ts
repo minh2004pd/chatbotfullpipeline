@@ -45,6 +45,31 @@ export async function stopTranscription(
   return resp.data
 }
 
+export interface UploadTranscriptionResponse {
+  meeting_id: string
+  status: string
+  utterance_count: number
+  language?: string
+  duration_ms?: number
+}
+
+export async function uploadAudioFile(
+  file: File,
+  userId: string,
+  opts: { title?: string; language?: string; diarize?: boolean } = {},
+): Promise<UploadTranscriptionResponse> {
+  const form = new FormData()
+  form.append('file', file)
+  if (opts.title) form.append('title', opts.title)
+  if (opts.language) form.append('language', opts.language)
+  if (opts.diarize !== undefined) form.append('diarize', String(opts.diarize))
+
+  const resp = await apiClient.post('/api/v1/transcription/upload', form, {
+    headers: { 'X-User-ID': userId },
+  })
+  return resp.data
+}
+
 export function openTranscriptionStream(meetingId: string): EventSource {
   const url = `/api/v1/transcription/stream/${meetingId}`
   // EventSource không hỗ trợ custom headers → dùng query param cho user_id

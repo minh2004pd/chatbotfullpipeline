@@ -4,6 +4,7 @@ import {
   openTranscriptionStream,
   startTranscription,
   stopTranscription,
+  uploadAudioFile,
 } from '@/api/transcription'
 import type { AudioSource, LiveUtterance, MeetingInfo, TranscriptionEvent } from '@/types'
 import AudioCaptureService from '@/services/AudioCaptureService'
@@ -22,6 +23,7 @@ export function useTranscription({ userId }: UseTranscriptionOptions) {
   const [meetings, setMeetings] = useState<MeetingInfo[]>([])
   const [error, setError] = useState<string | null>(null)
   const [isLoadingMeetings, setIsLoadingMeetings] = useState(false)
+  const [isUploading, setIsUploading] = useState(false)
 
   const captureServiceRef = useRef<AudioCaptureService | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
@@ -45,6 +47,24 @@ export function useTranscription({ userId }: UseTranscriptionOptions) {
       setIsLoadingMeetings(false)
     }
   }, [userId])
+
+  const uploadFile = useCallback(
+    async (file: File, title?: string) => {
+      setError(null)
+      setIsUploading(true)
+      try {
+        await uploadAudioFile(file, userId, { title: title || file.name })
+        await fetchMeetings()
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e)
+        setError(`Upload failed: ${msg}`)
+        throw e
+      } finally {
+        setIsUploading(false)
+      }
+    },
+    [userId, fetchMeetings],
+  )
 
   const stopRecording = useCallback(async () => {
     const mid = meetingIdRef.current
@@ -220,8 +240,10 @@ export function useTranscription({ userId }: UseTranscriptionOptions) {
     meetings,
     error,
     isLoadingMeetings,
+    isUploading,
     startRecording,
     stopRecording,
+    uploadFile,
     fetchMeetings,
   }
 }

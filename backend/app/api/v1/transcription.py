@@ -12,10 +12,11 @@ Endpoints:
 
 import asyncio
 import json
+import uuid
 from datetime import datetime, timezone
 
 import structlog
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import PlainTextResponse, StreamingResponse
 
 from app.core.dependencies import UserIDDep
@@ -26,8 +27,10 @@ from app.schemas.transcription import (
     StartTranscriptionRequest,
     StartTranscriptionResponse,
     StopTranscriptionResponse,
+    UploadTranscriptionResponse,
     UtteranceItem,
 )
+from app.services.sixtydb_service import SixtyDBError, SixtyDBService
 from app.services.soniox_service import SonioxService
 from app.services.transcript_rag_service import TranscriptRAGService
 
@@ -39,6 +42,7 @@ meetings_router = APIRouter(prefix="/meetings", tags=["meetings"])
 # ── Service/repo instances (module-level singletons) ─────────────────────────
 # SonioxService đã dùng module-level _sessions dict → safe với single process
 _soniox = SonioxService()
+_sixtydb = SixtyDBService()
 
 
 def _get_meeting_repo() -> MeetingRepository:
@@ -63,6 +67,78 @@ def _get_wiki_service():
     from app.services.wiki_service import WikiService
 
     return WikiService(repo=get_wiki_repo(), settings=get_settings())
+
+
+async def _persist_and_ingest(
+    *,
+    meeting_id: str,
+    user_id: str,
+    utterances: list[dict],
+    duration_ms: int,
+    languages: list[str] | None = None,
+) -> None:
+    """Shared finalize pipeline cho cả Soniox /stop và 60db /upload.
+
+    Lưu utterances → DynamoDB, cập nhật meeting metadata, ingest Qdrant RAG,
+    và fire-and-forget wiki synthesis. Giữ một code path duy nhất để tránh drift.
+    """
+    repo = _get_meeting_repo()
+
+    speakers: set[str] = set()
+    for utt in utterances:
+        speakers.add(utt.get("speaker", "speaker_0"))
+        repo.save_utterance(
+            meeting_id=meeting_id,
+            user_id=user_id,
+            seq=utt.get("seq", 0),
+            speaker=utt.get("speaker", "speaker_0"),
+            language=utt.get("language"),
+            text=utt.get("text", ""),
+            translated_text=utt.get("translated_text"),
+            confidence=utt.get("confidence"),
+            start_ms=utt.get("start_ms"),
+            end_ms=utt.get("end_ms"),
+        )
+
+    repo.update_meeting_status(
+        meeting_id=meeting_id,
+        user_id=user_id,
+        status="completed",
+        duration_ms=duration_ms,
+        speakers=list(speakers),
+        languages=languages,
+        utterance_count=len(utterances),
+    )
+
+    if not utterances:
+        return
+
+    meeting_meta = repo.get_meeting(meeting_id=meeting_id, user_id=user_id)
+    title = meeting_meta.get("title", "Untitled") if meeting_meta else "Untitled"
+
+    rag = _get_transcript_rag()
+    try:
+        await asyncio.to_thread(
+            rag.ingest_utterances,
+            meeting_id=meeting_id,
+            user_id=user_id,
+            title=title,
+            utterances=utterances,
+        )
+    except Exception as e:
+        logger.warning("transcript_rag_ingest_failed", meeting_id=meeting_id, error=str(e))
+
+    from app.core.config import get_settings as _gs
+
+    if _gs().wiki_enabled:
+        asyncio.create_task(
+            _get_wiki_service().update_wiki_from_transcript(
+                user_id=user_id,
+                meeting_id=meeting_id,
+                title=title,
+                utterances=utterances,
+            )
+        )
 
 
 # ── Transcription endpoints ───────────────────────────────────────────────────
@@ -140,72 +216,87 @@ async def stop_transcription(meeting_id: str, user_id: UserIDDep):
     duration_ms = _soniox.get_session_duration_ms(meeting_id)
     utterances = await _soniox.stop_session(meeting_id)  # returns [] nếu session không tồn tại
 
-    repo = _get_meeting_repo()
-
-    # Lưu utterances vào DynamoDB
-    speakers: set[str] = set()
-    for utt in utterances:
-        speakers.add(utt.get("speaker", "speaker_0"))
-        repo.save_utterance(
-            meeting_id=meeting_id,
-            user_id=user_id,
-            seq=utt.get("seq", 0),
-            speaker=utt.get("speaker", "speaker_0"),
-            language=utt.get("language"),
-            text=utt.get("text", ""),
-            translated_text=utt.get("translated_text"),
-            start_ms=utt.get("start_ms"),
-            end_ms=utt.get("end_ms"),
-        )
-
-    # Cập nhật meeting metadata
-    repo.update_meeting_status(
+    await _persist_and_ingest(
         meeting_id=meeting_id,
         user_id=user_id,
-        status="completed",
+        utterances=utterances,
         duration_ms=duration_ms,
-        speakers=list(speakers),
-        utterance_count=len(utterances),
     )
-
-    # Ingest vào Qdrant nếu có utterances
-    if utterances:
-        meeting_meta = repo.get_meeting(meeting_id=meeting_id, user_id=user_id)
-        title = meeting_meta.get("title", "Untitled") if meeting_meta else "Untitled"
-        rag = _get_transcript_rag()
-        try:
-            await asyncio.to_thread(
-                rag.ingest_utterances,
-                meeting_id=meeting_id,
-                user_id=user_id,
-                title=title,
-                utterances=utterances,
-            )
-        except Exception as e:
-            logger.warning("transcript_rag_ingest_failed", meeting_id=meeting_id, error=str(e))
-
-    # Fire-and-forget: tổng hợp wiki từ transcript vừa stop (background, không block response)
-    from app.core.config import get_settings as _gs
-
-    if utterances and _gs().wiki_enabled:
-        meeting_meta_for_wiki = repo.get_meeting(meeting_id=meeting_id, user_id=user_id)
-        wiki_title = (
-            meeting_meta_for_wiki.get("title", "Untitled") if meeting_meta_for_wiki else "Untitled"
-        )
-        asyncio.create_task(
-            _get_wiki_service().update_wiki_from_transcript(
-                user_id=user_id,
-                meeting_id=meeting_id,
-                title=wiki_title,
-                utterances=utterances,
-            )
-        )
 
     logger.info("transcription_stopped", meeting_id=meeting_id, utterances=len(utterances))
     return StopTranscriptionResponse(
         meeting_id=meeting_id,
         status="completed",
         utterance_count=len(utterances),
+    )
+
+
+@router.post("/upload", response_model=UploadTranscriptionResponse)
+async def upload_transcription(
+    user_id: UserIDDep,
+    file: UploadFile = File(...),
+    title: str | None = Form(None),
+    language: str | None = Form(None),
+    diarize: bool | None = Form(None),
+):
+    """Transcribe một file audio/video đã ghi sẵn qua 60db batch STT.
+
+    Tạo một meeting (source=60db) và đưa kết quả qua CÙNG pipeline với Soniox:
+    DynamoDB utterances → Qdrant RAG → wiki. File hiện diện trong Meetings list
+    giống hệt bản ghi realtime.
+    """
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="File rỗng")
+
+    meeting_id = f"meet_{uuid.uuid4().hex[:12]}"
+    meeting_title = title or (file.filename or "Uploaded audio")
+
+    repo = _get_meeting_repo()
+    repo.create_meeting(
+        meeting_id=meeting_id,
+        user_id=user_id,
+        title=meeting_title,
+        source="60db",
+        status="processing",
+    )
+
+    try:
+        result = await _sixtydb.transcribe_file(
+            file_bytes=file_bytes,
+            filename=file.filename or "audio",
+            content_type=file.content_type,
+            language=language,
+            diarize=diarize,
+        )
+    except SixtyDBError as e:
+        repo.update_meeting_status(meeting_id=meeting_id, user_id=user_id, status="failed")
+        raise HTTPException(status_code=502, detail=str(e)) from e
+
+    utterances = result["utterances"]
+    duration_ms = result["duration_ms"]
+    languages = [result["language"]] if result.get("language") else None
+
+    await _persist_and_ingest(
+        meeting_id=meeting_id,
+        user_id=user_id,
+        utterances=utterances,
+        duration_ms=duration_ms,
+        languages=languages,
+    )
+
+    logger.info(
+        "transcription_uploaded",
+        meeting_id=meeting_id,
+        user_id=user_id,
+        utterances=len(utterances),
+    )
+    return UploadTranscriptionResponse(
+        meeting_id=meeting_id,
+        status="completed",
+        utterance_count=len(utterances),
+        language=result.get("language"),
+        duration_ms=duration_ms,
     )
 
 
@@ -226,6 +317,7 @@ def list_meetings(user_id: UserIDDep):
                 "title": item.get("title", "Untitled"),
                 "user_id": item.get("user_id", user_id),
                 "status": item.get("status", "completed"),
+                "source": item.get("source", "soniox"),
                 "duration_ms": item.get("duration_ms"),
                 "speakers": item.get("speakers", []),
                 "languages": item.get("languages", []),

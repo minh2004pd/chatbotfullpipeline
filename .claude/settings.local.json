@@ -6,7 +6,14 @@
       "Bash(cd /home/minhdd/pet_proj/proj2/backend && uv run pytest:*)",
       "Bash(cd /home/minhdd/pet_proj/proj2/backend && uv run ruff:*)",
       "Bash(cd /home/minhdd/pet_proj/proj2/frontend && npm run lint:*)",
-      "Bash(cd /home/minhdd/pet_proj/proj2/scripts && python3 qa_check.py:*)"
+      "Bash(cd /home/minhdd/pet_proj/proj2/scripts && python3 qa_check.py:*)",
+      "WebFetch(domain:docs.60db.ai)",
+      "Bash(uv run *)",
+      "PowerShell(Get-Location *)",
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell(if \\(Test-Path \".venv\\\\Scripts\\\\python.exe\"\\) { \".venv exists\" } else { \"no .venv\" }; Get-ChildItem -Directory -Force | Select-Object Name; \"--- check py launcher ---\"; \\(Get-Command py -ErrorAction SilentlyContinue\\).Source)",
+      "PowerShell(py *)",
+      "Bash(py /tmp/check_sixtydb.py)"
     ]
   }
 }
